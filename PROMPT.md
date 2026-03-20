@@ -39,4 +39,4 @@ Design your debugging tools so they are low-friction to run repeatedly. It shoul
 
 Do not just patch visible symptoms. Use the reproducible experiments and debug tooling to validate the actual underlying fix, and check nearby edge cases too.
 
-
+Make sure the program runs at minimum 60fps, and no balls phase through walls unnecesarily.

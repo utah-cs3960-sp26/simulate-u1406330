@@ -1,0 +1,8 @@
+{
+  "name": "simulate-u1406330",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "sdl3"
+  ],
+  "builtin-baseline": "c21f78db5a402441bfc8052462233a2aff079ac0"
+}
