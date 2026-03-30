@@ -16,10 +16,28 @@ Deterministic 2D ball physics simulator in C++ with an SDL3 visualizer and a hea
 
 The project uses CMake and expects SDL3 to be installed and discoverable by `find_package(SDL3 CONFIG REQUIRED)`.
 
+Windows:
+
 ```powershell
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+macOS:
+
+```bash
+xcode-select --install
+brew install cmake sdl3
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+If CMake cannot find SDL3 on macOS, configure with Homebrew's prefix explicitly:
+
+```bash
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$(brew --prefix sdl3)"
 ```
 
 ## Run
