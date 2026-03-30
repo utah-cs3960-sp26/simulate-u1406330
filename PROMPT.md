@@ -7,9 +7,13 @@ The hard part is going to be making sure the balls don't end up overlapping or s
 
 Priority number one:
 
-Right now some balls escape the container by phasing through the container walls, this needs to be fixed.
+Make it possible to describe the initial scene in a CSV file; the CSV file should have one row per ball and list a starting position and a color. (The walls can be fixed, or you can add them and even other fields, like size, if you want.) Make the simulator save the final positions to a similar CSV file. Add a tool that takes an initial scene CSV file and assign colors based on where the final balls end up and what color a given image has at that location.
+
+If you do it right, you should be able to run the simulator, have a lot of colorful balls bounce around seemingly at random, and then when things settle down you should be able to see an image form. There are videos on Youtube where you can see this in action.
 
 Priority number two:
+
+Right now some balls escape the container by phasing through the container walls, this needs to be fixed.
 
 The balls never fully settle down, they just continue to bounce against eachother forever. this needs to be fixed.
 
@@ -20,9 +24,5 @@ Please work efficiently, if there is a large task, split it up into chunks and d
 
 When both priorities have been solved proceed to this task,
 
-Make it possible to describe the initial scene in a CSV file; the CSV file should have one row per ball and list a starting position and a color. (The walls can be fixed, or you can add them and even other fields, like size, if you want.) Make the simulator save the final positions to a similar CSV file. Add a tool that takes an initial scene CSV file and assign colors based on where the final balls end up and what color a given image has at that location.
-
-If you do it right, you should be able to run the simulator, have a lot of colorful balls bounce around seemingly at random, and then when things settle down you should be able to see an image form. There are videos on Youtube where you can see this in action.
-
-For this you can use the folder reference for a references related to this task.
+For both the physics logic and the csv logic, you should use the folder "reference" for reference logic.
 
