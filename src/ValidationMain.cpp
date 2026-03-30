@@ -214,7 +214,7 @@ sim::Simulation makeSimulation(const Options& options) {
 }
 
 void printUsage() {
-    std::cerr << "usage: physics_validation [--scenario container|stack|gap] [--balls N]"
+    std::cerr << "usage: physics_validation [--scenario container|stack|packed|gap] [--balls N]"
                  " [--steps N] [--dump-every N] [--dump-balls N] [--dump-final]"
                  " [--seed N] [--restitution R] [--gravity G] [--dt DT] [--radius R]"
                  " [--linear-damping D] [--sleep-bounce-speed V] [--allowed-travel X]"

@@ -61,6 +61,75 @@ void addContainerBalls(Scene& scene, const ScenarioOptions& options) {
     }
 }
 
+void addPackedBalls(Scene& scene, const ScenarioOptions& options) {
+    const double boxWidth = scene.bounds.maxX - scene.bounds.minX;
+    const double boxHeight = scene.bounds.maxY - scene.bounds.minY;
+    const double spawnWidth = boxWidth * 0.58;
+    const double spawnHeight = boxHeight * 0.94;
+    int requestedCount = options.ballCount;
+    double radius = options.radius;
+    if (requestedCount <= 0) {
+        const double targetCoverage = 0.75;
+        const double boxArea = boxWidth * boxHeight;
+        const double ballArea = 3.14159265358979323846 * radius * radius;
+        requestedCount = static_cast<int>(std::floor(targetCoverage * boxArea / std::max(ballArea, 1.0)));
+    } else {
+        const double targetCoverage = 0.82;
+        const double spawnArea = spawnWidth * spawnHeight;
+        const double fittedRadius = std::sqrt(
+            (targetCoverage * spawnArea) /
+            (static_cast<double>(requestedCount) * 3.14159265358979323846));
+        radius = std::min(radius, std::max(2.0, fittedRadius));
+    }
+
+    std::mt19937 rng(options.seed);
+    std::uniform_real_distribution<double> jitter(-0.035 * radius, 0.035 * radius);
+    std::uniform_real_distribution<double> startVx(10.0, 18.0);
+    std::uniform_real_distribution<double> startVy(-6.0, 6.0);
+    std::uniform_real_distribution<double> randomX(0.0, 1.0);
+    std::uniform_real_distribution<double> randomY(0.0, 1.0);
+
+    const double minX = scene.bounds.minX + radius * 1.1;
+    const double maxX = minX + spawnWidth - radius * 1.1;
+    const double minY = scene.bounds.minY + radius * 1.1;
+    const double maxY = minY + spawnHeight - radius * 1.1;
+    const double spacingX = radius * 2.02;
+    const double spacingY = radius * std::sqrt(3.0) * 1.01;
+
+    int index = 0;
+    for (int row = 0; index < requestedCount; ++row) {
+        const double y = minY + static_cast<double>(row) * spacingY;
+        if (y > maxY) {
+            break;
+        }
+
+        const double rowOffset = (row % 2 == 0) ? 0.0 : spacingX * 0.5;
+        for (double x = minX + rowOffset; x <= maxX && index < requestedCount; x += spacingX) {
+            const double horizontalBias = (x - minX) / std::max(maxX - minX, 1.0);
+            scene.balls.push_back(makeBall(
+                {x + jitter(rng), y + jitter(rng)},
+                {startVx(rng) * (1.15 - 0.35 * horizontalBias), startVy(rng)},
+                radius,
+                makeRainbowColor(static_cast<double>(index) * 0.009 +
+                                 static_cast<double>(options.seed) * 0.0001)));
+            ++index;
+        }
+    }
+
+    while (index < requestedCount) {
+        const double x = minX + (maxX - minX) * randomX(rng);
+        const double y = minY + (maxY - minY) * randomY(rng);
+        const double horizontalBias = (x - minX) / std::max(maxX - minX, 1.0);
+        scene.balls.push_back(makeBall(
+            {x + jitter(rng), y + jitter(rng)},
+            {startVx(rng) * (1.15 - 0.35 * horizontalBias), startVy(rng)},
+            radius,
+            makeRainbowColor(static_cast<double>(index) * 0.009 +
+                             static_cast<double>(options.seed) * 0.0001)));
+        ++index;
+    }
+}
+
 Scene buildContainerScene(const ScenarioOptions& options) {
     const double margin =
         std::max(24.0, std::min(options.width, options.height) * 0.08);
@@ -91,6 +160,25 @@ Scene buildStackScene(const ScenarioOptions& options) {
         scene.balls.push_back(
             makeBall({160.0, y}, {0.0, 0.0}, radius, makeRainbowColor(static_cast<double>(i) * 0.11)));
     }
+    return scene;
+}
+
+Scene buildPackedScene(const ScenarioOptions& options) {
+    const double margin =
+        std::max(24.0, std::min(options.width, options.height) * 0.08);
+    const double side =
+        std::max(240.0, std::min(options.width, options.height) - margin * 2.0);
+    Scene scene = makeBoxScene(side, side, "packed");
+    const Vec2 offset{
+        (options.width - side) * 0.5,
+        (options.height - side) * 0.5};
+    scene.bounds = {offset.x, offset.y, offset.x + side, offset.y + side};
+    for (Wall& wall : scene.walls) {
+        wall.a += offset;
+        wall.b += offset;
+    }
+
+    addPackedBalls(scene, options);
     return scene;
 }
 
@@ -137,6 +225,9 @@ Scene buildScenario(const ScenarioOptions& options) {
     }
     if (options.name == "stack") {
         return buildStackScene(options);
+    }
+    if (options.name == "packed") {
+        return buildPackedScene(options);
     }
     if (options.name == "gap") {
         return buildGapScene(options);

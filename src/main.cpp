@@ -401,7 +401,7 @@ int runVisual(const Options& options) {
 }
 
 void printUsage() {
-    std::cerr << "usage: simulator [--mode visual|headless] [--scenario container|stack|gap]"
+    std::cerr << "usage: simulator [--mode visual|headless] [--scenario container|stack|packed|gap]"
                  " [--balls N] [--steps N] [--dump-every N] [--dump-balls N] [--dump-final]"
                  " [--seed N] [--restitution R] [--gravity G] [--dt DT]"
                  " [--scene-width N] [--scene-height N] [--radius R]"

@@ -20,6 +20,10 @@ struct CsvColumns {
     std::size_t id = std::numeric_limits<std::size_t>::max();
     std::size_t x = std::numeric_limits<std::size_t>::max();
     std::size_t y = std::numeric_limits<std::size_t>::max();
+    std::size_t previousX = std::numeric_limits<std::size_t>::max();
+    std::size_t previousY = std::numeric_limits<std::size_t>::max();
+    std::size_t vx = std::numeric_limits<std::size_t>::max();
+    std::size_t vy = std::numeric_limits<std::size_t>::max();
     std::size_t r = std::numeric_limits<std::size_t>::max();
     std::size_t g = std::numeric_limits<std::size_t>::max();
     std::size_t b = std::numeric_limits<std::size_t>::max();
@@ -207,6 +211,10 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
             columns.id = findColumn(headers, "ball_id");
             columns.x = findColumn(headers, "x");
             columns.y = findColumn(headers, "y");
+            columns.previousX = findColumn(headers, "previous_x");
+            columns.previousY = findColumn(headers, "previous_y");
+            columns.vx = findColumn(headers, "vx");
+            columns.vy = findColumn(headers, "vy");
             columns.r = findColumn(headers, "r");
             columns.g = findColumn(headers, "g");
             columns.b = findColumn(headers, "b");
@@ -229,6 +237,10 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
 
         double x = 0.0;
         double y = 0.0;
+        double previousX = 0.0;
+        double previousY = 0.0;
+        double vx = 0.0;
+        double vy = 0.0;
         int r = 0;
         int g = 0;
         int b = 0;
@@ -243,11 +255,39 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
             !parseDouble(cells[columns.radius], radius)) {
             throw std::runtime_error("failed to parse radius in scene csv row");
         }
+        if (columns.vx != std::numeric_limits<std::size_t>::max() &&
+            !cells[columns.vx].empty() &&
+            !parseDouble(cells[columns.vx], vx)) {
+            throw std::runtime_error("failed to parse vx in scene csv row");
+        }
+        if (columns.vy != std::numeric_limits<std::size_t>::max() &&
+            !cells[columns.vy].empty() &&
+            !parseDouble(cells[columns.vy], vy)) {
+            throw std::runtime_error("failed to parse vy in scene csv row");
+        }
+        const bool hasPreviousX =
+            columns.previousX != std::numeric_limits<std::size_t>::max() &&
+            !cells[columns.previousX].empty();
+        const bool hasPreviousY =
+            columns.previousY != std::numeric_limits<std::size_t>::max() &&
+            !cells[columns.previousY].empty();
+        if (hasPreviousX != hasPreviousY) {
+            throw std::runtime_error("scene csv row must provide both previous_x and previous_y");
+        }
+        if (hasPreviousX &&
+            (!parseDouble(cells[columns.previousX], previousX) ||
+             !parseDouble(cells[columns.previousY], previousY))) {
+            throw std::runtime_error("failed to parse previous position in scene csv row");
+        }
 
         Ball ball;
         ball.position = {x, y};
-        ball.previousPosition = ball.position;
-        ball.velocity = {0.0, 0.0};
+        if (hasPreviousX) {
+            ball.previousPosition = {previousX, previousY};
+        } else {
+            ball.previousPosition = ball.position - Vec2{vx, vy};
+        }
+        ball.velocity = {vx, vy};
         ball.radius = radius;
         ball.inverseMass = 1.0 / std::max(1.0, radius * radius);
         ball.color = makeColor(r, g, b);
@@ -283,11 +323,13 @@ void saveSceneCsv(const std::filesystem::path& path, const Scene& scene) {
         out << "# wall," << wall.a.x << ',' << wall.a.y << ','
             << wall.b.x << ',' << wall.b.y << '\n';
     }
-    out << "ball_id,x,y,r,g,b,radius\n";
+    out << "ball_id,x,y,previous_x,previous_y,vx,vy,r,g,b,radius\n";
     for (std::size_t index = 0; index < scene.balls.size(); ++index) {
         const Ball& ball = scene.balls[index];
         out << index << ','
             << ball.position.x << ',' << ball.position.y << ','
+            << ball.previousPosition.x << ',' << ball.previousPosition.y << ','
+            << ball.velocity.x << ',' << ball.velocity.y << ','
             << static_cast<int>(ball.color.r) << ','
             << static_cast<int>(ball.color.g) << ','
             << static_cast<int>(ball.color.b) << ','

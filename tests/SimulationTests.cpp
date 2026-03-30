@@ -91,6 +91,64 @@ bool testContainerIntegrity() {
     return true;
 }
 
+bool testPackedSceneHasHighDensity() {
+    sim::ScenarioOptions options;
+    options.name = "packed";
+    options.ballCount = 0;
+    options.width = 720.0;
+    options.height = 720.0;
+    options.radius = 6.0;
+
+    const sim::Scene scene = sim::buildScenario(options);
+    return expect(scene.balls.size() > 2000, "packed scene should fill most of the box with balls");
+}
+
+bool testPackedSceneStartsAsLaunchBlob() {
+    sim::ScenarioOptions options;
+    options.name = "packed";
+    options.ballCount = 2300;
+    options.width = 720.0;
+    options.height = 720.0;
+    options.radius = 6.0;
+
+    const sim::Scene scene = sim::buildScenario(options);
+    if (!expect(!scene.balls.empty(), "packed scene should contain balls")) {
+        return false;
+    }
+
+    double minX = std::numeric_limits<double>::infinity();
+    double maxX = -std::numeric_limits<double>::infinity();
+    double totalVx = 0.0;
+    for (const sim::Ball& ball : scene.balls) {
+        minX = std::min(minX, ball.position.x);
+        maxX = std::max(maxX, ball.position.x);
+        totalVx += ball.velocity.x;
+    }
+
+    const double occupiedWidth = maxX - minX;
+    const double boxWidth = scene.bounds.maxX - scene.bounds.minX;
+    return expect(occupiedWidth < boxWidth * 0.7, "packed scene should start in a partial-width blob") &&
+           expect(totalVx / static_cast<double>(scene.balls.size()) > 8.0,
+                  "packed scene should launch balls into the box");
+}
+
+bool testPackedSceneHonorsRequestedBallCountByScalingRadius() {
+    sim::ScenarioOptions options;
+    options.name = "packed";
+    options.ballCount = 5000;
+    options.width = 720.0;
+    options.height = 720.0;
+    options.radius = 6.0;
+
+    const sim::Scene scene = sim::buildScenario(options);
+    if (!expect(scene.balls.size() == 5000, "packed scene should honor requested ball count")) {
+        return false;
+    }
+
+    return expect(scene.balls.front().radius < 6.0,
+                  "packed scene should shrink radius when higher counts are requested");
+}
+
 bool testContainerIsSquare() {
     sim::ScenarioOptions options;
     options.name = "container";
@@ -189,6 +247,8 @@ bool testCsvRoundTrip() {
 
     sim::Ball first;
     first.position = {12.5, 20.25};
+    first.velocity = {1.5, -0.75};
+    first.previousPosition = first.position - first.velocity;
     first.radius = 6.0;
     first.inverseMass = 1.0 / 36.0;
     first.color = {12, 34, 56, 255};
@@ -196,6 +256,8 @@ bool testCsvRoundTrip() {
 
     sim::Ball second;
     second.position = {42.75, 88.5};
+    second.velocity = {-2.25, 0.5};
+    second.previousPosition = second.position - second.velocity;
     second.radius = 9.0;
     second.inverseMass = 1.0 / 81.0;
     second.color = {200, 150, 100, 255};
@@ -218,6 +280,12 @@ bool testCsvRoundTrip() {
         const sim::Ball& actual = loaded.balls[i];
         if (!expectNear(actual.position.x, expected.position.x, 1e-12, "csv x mismatch") ||
             !expectNear(actual.position.y, expected.position.y, 1e-12, "csv y mismatch") ||
+            !expectNear(actual.previousPosition.x, expected.previousPosition.x, 1e-12,
+                        "csv previous x mismatch") ||
+            !expectNear(actual.previousPosition.y, expected.previousPosition.y, 1e-12,
+                        "csv previous y mismatch") ||
+            !expectNear(actual.velocity.x, expected.velocity.x, 1e-12, "csv vx mismatch") ||
+            !expectNear(actual.velocity.y, expected.velocity.y, 1e-12, "csv vy mismatch") ||
             !expectNear(actual.radius, expected.radius, 1e-12, "csv radius mismatch") ||
             !expect(actual.color.r == expected.color.r &&
                         actual.color.g == expected.color.g &&
@@ -239,9 +307,9 @@ bool testCsvPreservesWalls() {
         std::filesystem::temp_directory_path() / "simulate_u1406330_minimal_scene.csv";
     {
         std::ofstream out(path);
-        out << "x,y,r,g,b,radius\n";
-        out << "20,30,255,0,0,5\n";
-        out << "60,80,0,255,0,7\n";
+        out << "x,y,previous_x,previous_y,vx,vy,r,g,b,radius\n";
+        out << "20,30,18.75,30.5,1.25,-0.5,255,0,0,5\n";
+        out << "60,80,62,79.25,-2.0,0.75,0,255,0,7\n";
     }
 
     sim::loadSceneCsv(path, scene);
@@ -306,6 +374,9 @@ struct TestCase {
 constexpr TestCase kTests[] = {
     {"deterministic_replay", &testDeterministicReplay},
     {"container_integrity", &testContainerIntegrity},
+    {"packed_scene_has_high_density", &testPackedSceneHasHighDensity},
+    {"packed_scene_starts_as_launch_blob", &testPackedSceneStartsAsLaunchBlob},
+    {"packed_scene_honors_requested_ball_count", &testPackedSceneHonorsRequestedBallCountByScalingRadius},
     {"container_is_square", &testContainerIsSquare},
     {"balls_settle_in_box", &testBallsSettleInBox},
     {"fast_wall_containment", &testFastWallContainment},
