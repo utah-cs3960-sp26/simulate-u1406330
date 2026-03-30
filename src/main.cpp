@@ -376,6 +376,9 @@ int runVisual(const Options& options) {
         }
 
         for (const sim::Ball& ball : simulation.scene().balls) {
+            if (!ball.emitted) {
+                continue;
+            }
             SDL_SetRenderDrawColor(
                 renderer,
                 ball.color.r,

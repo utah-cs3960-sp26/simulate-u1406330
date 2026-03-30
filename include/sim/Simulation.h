@@ -22,6 +22,8 @@ struct Ball {
     Vec2 velocity;
     double radius = 6.0;
     double inverseMass = 1.0;
+    int spawnFrame = 0;
+    bool emitted = true;
     ColorRGBA color{};
 };
 
@@ -83,6 +85,7 @@ public:
     StepStats lastStats() const { return lastStats_; }
 
 private:
+    void activateBallsForCurrentFrame();
     void singleStep(double dt, StepStats& stats);
     int chooseSubsteps(double dt) const;
     void solveBallCollisions(StepStats& stats);

@@ -29,13 +29,26 @@ Simulation::Simulation(Scene scene, SimulationConfig config)
     : scene_(std::move(scene)),
       config_(config) {
     for (Ball& ball : scene_.balls) {
+        ball.emitted = ball.spawnFrame <= 0;
         if (lengthSquared(ball.previousPosition - ball.position) <= kEpsilon) {
             ball.previousPosition = ball.position - ball.velocity * config_.fixedDt;
         }
     }
 }
 
+void Simulation::activateBallsForCurrentFrame() {
+    for (Ball& ball : scene_.balls) {
+        if (ball.emitted || ball.spawnFrame > frameIndex_) {
+            continue;
+        }
+        ball.emitted = true;
+        ball.previousPosition = ball.position - ball.velocity;
+    }
+}
+
 void Simulation::step() {
+    activateBallsForCurrentFrame();
+
     StepStats stats;
     stats.frameIndex = frameIndex_;
     stats.substeps = chooseSubsteps(config_.fixedDt);
@@ -47,6 +60,10 @@ void Simulation::step() {
     }
 
     for (Ball& ball : scene_.balls) {
+        if (!ball.emitted) {
+            ball.velocity = {0.0, 0.0};
+            continue;
+        }
         if (subDt <= kEpsilon) {
             ball.velocity = {0.0, 0.0};
         } else {
@@ -106,6 +123,9 @@ void Simulation::solveBallCollisions(StepStats& stats) {
 
     for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
         const Ball& ball = scene_.balls[i];
+        if (!ball.emitted) {
+            continue;
+        }
         const int cellX = cellCoord(ball.position.x, scene_.bounds.minX, columns);
         const int cellY = cellCoord(ball.position.y, scene_.bounds.minY, rows);
         grid[cellIndex(cellX, cellY)].push_back(i);
@@ -161,6 +181,9 @@ void Simulation::solveBallCollisions(StepStats& stats) {
 
 void Simulation::advanceBalls(double dt) {
     for (Ball& ball : scene_.balls) {
+        if (!ball.emitted) {
+            continue;
+        }
         const Vec2 displacement = ball.position - ball.previousPosition;
         const Vec2 acceleration{0.0, config_.gravity};
         const Vec2 nextPosition =
@@ -173,6 +196,9 @@ void Simulation::advanceBalls(double dt) {
 
 void Simulation::solveWallOverlaps(StepStats& stats) {
     for (Ball& ball : scene_.balls) {
+        if (!ball.emitted) {
+            continue;
+        }
         for (const Wall& wall : scene_.walls) {
             const Vec2 wallVector = wall.b - wall.a;
             const double wallLength = length(wallVector);
@@ -218,6 +244,9 @@ void Simulation::solveWallOverlaps(StepStats& stats) {
 
 void Simulation::enforceBounds() {
     for (Ball& ball : scene_.balls) {
+        if (!ball.emitted) {
+            continue;
+        }
         const double minX = scene_.bounds.minX + ball.radius;
         const double maxX = scene_.bounds.maxX - ball.radius;
         const double minY = scene_.bounds.minY + ball.radius;
@@ -234,8 +263,14 @@ void Simulation::updateContactMetrics(StepStats& stats) const {
 
     for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
         const Ball& a = scene_.balls[i];
+        if (!a.emitted) {
+            continue;
+        }
         for (std::size_t j = i + 1; j < scene_.balls.size(); ++j) {
             const Ball& b = scene_.balls[j];
+            if (!b.emitted) {
+                continue;
+            }
             const double penetration =
                 a.radius + b.radius - length(b.position - a.position);
             if (penetration > 0.0) {
@@ -259,6 +294,9 @@ void Simulation::updateVelocityMetrics(StepStats& stats) const {
     stats.kineticEnergy = 0.0;
     stats.maxSpeed = 0.0;
     for (const Ball& ball : scene_.balls) {
+        if (!ball.emitted) {
+            continue;
+        }
         const double mass = ball.inverseMass > kEpsilon ? 1.0 / ball.inverseMass : 0.0;
         const double speedSq = lengthSquared(ball.velocity);
         stats.kineticEnergy += 0.5 * mass * speedSq;
@@ -269,6 +307,9 @@ void Simulation::updateVelocityMetrics(StepStats& stats) const {
 void Simulation::updateEscapeCount(StepStats& stats) const {
     stats.escapedBalls = 0;
     for (const Ball& ball : scene_.balls) {
+        if (!ball.emitted) {
+            continue;
+        }
         if (ball.position.x - ball.radius < scene_.bounds.minX - 1e-6 ||
             ball.position.x + ball.radius > scene_.bounds.maxX + 1e-6 ||
             ball.position.y - ball.radius < scene_.bounds.minY - 1e-6 ||

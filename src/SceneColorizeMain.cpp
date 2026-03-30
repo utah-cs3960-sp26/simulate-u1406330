@@ -27,9 +27,9 @@ struct Options {
     int sceneWidth = 720;
     int sceneHeight = 720;
     double containerInset = 48.0;
-    int balls = 2300;
+    int balls = 0;
     std::uint32_t seed = 7;
-    double radius = 6.0;
+    double radius = 8.0;
     int steps = 1800;
     double restitution = 0.25;
     double gravity = 120.0;

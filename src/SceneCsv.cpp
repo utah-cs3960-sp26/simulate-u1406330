@@ -22,6 +22,7 @@ struct CsvColumns {
     std::size_t y = std::numeric_limits<std::size_t>::max();
     std::size_t previousX = std::numeric_limits<std::size_t>::max();
     std::size_t previousY = std::numeric_limits<std::size_t>::max();
+    std::size_t spawnFrame = std::numeric_limits<std::size_t>::max();
     std::size_t vx = std::numeric_limits<std::size_t>::max();
     std::size_t vy = std::numeric_limits<std::size_t>::max();
     std::size_t r = std::numeric_limits<std::size_t>::max();
@@ -213,6 +214,7 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
             columns.y = findColumn(headers, "y");
             columns.previousX = findColumn(headers, "previous_x");
             columns.previousY = findColumn(headers, "previous_y");
+            columns.spawnFrame = findColumn(headers, "spawn_frame");
             columns.vx = findColumn(headers, "vx");
             columns.vy = findColumn(headers, "vy");
             columns.r = findColumn(headers, "r");
@@ -241,6 +243,7 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
         double previousY = 0.0;
         double vx = 0.0;
         double vy = 0.0;
+        int spawnFrame = 0;
         int r = 0;
         int g = 0;
         int b = 0;
@@ -264,6 +267,11 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
             !cells[columns.vy].empty() &&
             !parseDouble(cells[columns.vy], vy)) {
             throw std::runtime_error("failed to parse vy in scene csv row");
+        }
+        if (columns.spawnFrame != std::numeric_limits<std::size_t>::max() &&
+            !cells[columns.spawnFrame].empty() &&
+            !parseInt(cells[columns.spawnFrame], spawnFrame)) {
+            throw std::runtime_error("failed to parse spawn_frame in scene csv row");
         }
         const bool hasPreviousX =
             columns.previousX != std::numeric_limits<std::size_t>::max() &&
@@ -290,6 +298,8 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
         ball.velocity = {vx, vy};
         ball.radius = radius;
         ball.inverseMass = 1.0 / std::max(1.0, radius * radius);
+        ball.spawnFrame = std::max(0, spawnFrame);
+        ball.emitted = ball.spawnFrame <= 0;
         ball.color = makeColor(r, g, b);
         balls.push_back(ball);
     }
@@ -323,12 +333,13 @@ void saveSceneCsv(const std::filesystem::path& path, const Scene& scene) {
         out << "# wall," << wall.a.x << ',' << wall.a.y << ','
             << wall.b.x << ',' << wall.b.y << '\n';
     }
-    out << "ball_id,x,y,previous_x,previous_y,vx,vy,r,g,b,radius\n";
+    out << "ball_id,x,y,previous_x,previous_y,spawn_frame,vx,vy,r,g,b,radius\n";
     for (std::size_t index = 0; index < scene.balls.size(); ++index) {
         const Ball& ball = scene.balls[index];
         out << index << ','
             << ball.position.x << ',' << ball.position.y << ','
             << ball.previousPosition.x << ',' << ball.previousPosition.y << ','
+            << ball.spawnFrame << ','
             << ball.velocity.x << ',' << ball.velocity.y << ','
             << static_cast<int>(ball.color.r) << ','
             << static_cast<int>(ball.color.g) << ','
