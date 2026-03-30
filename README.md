@@ -92,3 +92,25 @@ build\simulator.exe --mode headless --scenario stack --restitution 0.05 --dump-f
 - Restitution changes bounce response, not the overlap-removal solver, so lower restitution settles faster while the final packed footprint remains effectively unchanged.
 - Low-speed restitution is disabled to suppress endless micro-bouncing.
 - The simulation uses a fixed step with internal substeps chosen from current velocity and ball radius, then clamps runaway speeds so the sim stays tractable in real time.
+
+
+./scene_colorize \
+  --scenario packed \
+  --seed 7 \
+  --image ../data/creeper.png \
+  --output-csv ../out/creeper_recolored_hole.csv \
+  --final-csv ../out/creeper_final_hole.csv \
+  --scene-width 720 \
+  --scene-height 720 \
+  --steps 5000 \
+  --quiet-window 120 \
+  --max-quiet-speed 8 \
+  --max-quiet-energy 100 \
+  --debug-every 1000
+
+
+./simulator \
+  --mode visual \
+  --scene-csv ../out/creeper_recolored_hole.csv \
+  --scene-width 720 \
+  --scene-height 720
