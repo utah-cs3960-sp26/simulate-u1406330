@@ -78,9 +78,15 @@ if(SIMULATOR_BUILD_TESTS)
     target_link_libraries(physics_tests PRIVATE sim_core)
     add_test(NAME physics.deterministic_replay COMMAND physics_tests deterministic_replay)
     add_test(NAME physics.container_integrity COMMAND physics_tests container_integrity)
+    add_test(NAME physics.container_is_square COMMAND physics_tests container_is_square)
+    add_test(NAME physics.balls_settle_in_box COMMAND physics_tests balls_settle_in_box)
     add_test(NAME physics.fast_wall_containment COMMAND physics_tests fast_wall_containment)
     add_test(NAME physics.csv_roundtrip COMMAND physics_tests csv_roundtrip)
     add_test(NAME physics.csv_preserves_walls COMMAND physics_tests csv_preserves_walls)
+    add_test(
+        NAME physics.csv_roundtrip_preserves_scene_metadata
+        COMMAND physics_tests csv_roundtrip_preserves_scene_metadata
+    )
     if(SDL3_FOUND)
         add_executable(physics_image_tests tests/ImageSamplingTests.cpp)
         target_link_libraries(physics_image_tests PRIVATE sim_color_tools)

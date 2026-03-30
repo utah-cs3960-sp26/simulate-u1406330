@@ -41,7 +41,7 @@ sim::Simulation makeScenarioSimulation(const std::string& name,
     options.radius = 6.0;
 
     sim::SimulationConfig config;
-    config.gravity = 1400.0;
+    config.gravity = 120.0;
     config.restitution = 0.25;
     config.fixedDt = dt;
     config.linearDamping = 0.05;
@@ -89,6 +89,62 @@ bool testContainerIntegrity() {
         }
     }
     return true;
+}
+
+bool testContainerIsSquare() {
+    sim::ScenarioOptions options;
+    options.name = "container";
+    options.ballCount = 10;
+    options.width = 900.0;
+    options.height = 720.0;
+    const sim::Scene scene = sim::buildScenario(options);
+
+    const double width = scene.bounds.maxX - scene.bounds.minX;
+    const double height = scene.bounds.maxY - scene.bounds.minY;
+    return expectNear(width, height, 1e-12, "container bounds should be square") &&
+           expect(scene.walls.size() == 4, "container should only have square boundary walls");
+}
+
+bool testBallsSettleInBox() {
+    sim::Scene scene = sim::makeBoxScene(320.0, 320.0, "settle");
+    for (int i = 0; i < 20; ++i) {
+        sim::Ball ball;
+        ball.position = {40.0 + static_cast<double>(i / 5) * 14.0,
+                         40.0 + static_cast<double>(i % 5) * 14.0};
+        ball.radius = 6.0;
+        ball.inverseMass = 1.0 / 36.0;
+        scene.balls.push_back(ball);
+    }
+
+    sim::SimulationConfig config;
+    config.gravity = 120.0;
+    config.restitution = 0.2;
+    config.fixedDt = 1.0 / 60.0;
+    config.linearDamping = 0.05;
+    config.sleepBounceSpeed = 32.0;
+    config.sleepLinearSpeed = 32.0;
+    config.allowedTravelPerSubstep = 0.25;
+    config.overlapSlop = 0.001;
+    config.maxLinearSpeed = 220.0;
+    config.solverIterations = 8;
+    config.maxSubsteps = 16;
+
+    sim::Simulation simulation(std::move(scene), config);
+    int quietFrames = 0;
+    for (int step = 0; step < 2400; ++step) {
+        simulation.step();
+        const sim::StepStats stats = simulation.lastStats();
+        if (stats.maxSpeed <= 4.0 && stats.kineticEnergy <= 20.0) {
+            ++quietFrames;
+            if (quietFrames >= 120) {
+                return true;
+            }
+        } else {
+            quietFrames = 0;
+        }
+    }
+
+    return expect(false, "balls never reached a sustained settled state");
 }
 
 bool testFastWallContainment() {
@@ -197,6 +253,49 @@ bool testCsvPreservesWalls() {
     return expect(scene.balls.size() == 2, "loading CSV should replace balls");
 }
 
+bool testCsvRoundTripPreservesSceneMetadata() {
+    sim::Scene scene = sim::makeInsetBoxScene(640.0, 480.0, 40.0, "metadata");
+    scene.walls.push_back({{180.0, 120.0}, {460.0, 120.0}});
+
+    sim::Ball ball;
+    ball.position = {96.0, 88.0};
+    ball.radius = 7.5;
+    ball.inverseMass = 1.0 / (ball.radius * ball.radius);
+    ball.color = {10, 20, 30, 255};
+    scene.balls.push_back(ball);
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "simulate_u1406330_scene_metadata.csv";
+    sim::saveSceneCsv(path, scene);
+
+    sim::Scene loaded;
+    sim::loadSceneCsv(path, loaded);
+    std::filesystem::remove(path);
+
+    if (!expectNear(loaded.bounds.minX, scene.bounds.minX, 1e-12, "bounds minX mismatch") ||
+        !expectNear(loaded.bounds.minY, scene.bounds.minY, 1e-12, "bounds minY mismatch") ||
+        !expectNear(loaded.bounds.maxX, scene.bounds.maxX, 1e-12, "bounds maxX mismatch") ||
+        !expectNear(loaded.bounds.maxY, scene.bounds.maxY, 1e-12, "bounds maxY mismatch")) {
+        return false;
+    }
+
+    if (!expect(loaded.walls.size() == scene.walls.size(), "wall count mismatch") ||
+        !expect(loaded.balls.size() == scene.balls.size(), "ball count mismatch")) {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < scene.walls.size(); ++i) {
+        if (!expectNear(loaded.walls[i].a.x, scene.walls[i].a.x, 1e-12, "wall ax mismatch") ||
+            !expectNear(loaded.walls[i].a.y, scene.walls[i].a.y, 1e-12, "wall ay mismatch") ||
+            !expectNear(loaded.walls[i].b.x, scene.walls[i].b.x, 1e-12, "wall bx mismatch") ||
+            !expectNear(loaded.walls[i].b.y, scene.walls[i].b.y, 1e-12, "wall by mismatch")) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 using TestFn = bool (*)();
 
 struct TestCase {
@@ -207,9 +306,12 @@ struct TestCase {
 constexpr TestCase kTests[] = {
     {"deterministic_replay", &testDeterministicReplay},
     {"container_integrity", &testContainerIntegrity},
+    {"container_is_square", &testContainerIsSquare},
+    {"balls_settle_in_box", &testBallsSettleInBox},
     {"fast_wall_containment", &testFastWallContainment},
     {"csv_roundtrip", &testCsvRoundTrip},
     {"csv_preserves_walls", &testCsvPreservesWalls},
+    {"csv_roundtrip_preserves_scene_metadata", &testCsvRoundTripPreservesSceneMetadata},
 };
 
 }  // namespace

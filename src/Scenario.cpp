@@ -1,4 +1,5 @@
 #include "sim/Scenario.h"
+#include "sim/SceneSetup.h"
 
 #include <algorithm>
 #include <cmath>
@@ -28,33 +29,28 @@ Ball makeBall(const Vec2& position, const Vec2& velocity, double radius, const C
     return ball;
 }
 
-void addBoundaryWalls(Scene& scene, double width, double height) {
-    scene.walls.push_back({{0.0, 0.0}, {width, 0.0}});
-    scene.walls.push_back({{width, 0.0}, {width, height}});
-    scene.walls.push_back({{width, height}, {0.0, height}});
-    scene.walls.push_back({{0.0, height}, {0.0, 0.0}});
-}
-
 void addContainerBalls(Scene& scene, const ScenarioOptions& options) {
     std::mt19937 rng(options.seed);
-    std::uniform_real_distribution<double> jitter(-0.04 * options.radius, 0.04 * options.radius);
-    std::uniform_real_distribution<double> startVx(-18.0, 18.0);
-    std::uniform_real_distribution<double> startVy(-6.0, 6.0);
+    std::uniform_real_distribution<double> jitter(-0.08 * options.radius, 0.08 * options.radius);
+    std::uniform_real_distribution<double> startVx(2.0, 8.0);
+    std::uniform_real_distribution<double> startVy(-2.0, 2.0);
 
-    const double spacing = options.radius * 2.28;
-    const double minX = 260.0;
-    const double maxX = options.width - 260.0;
-    const double startY = 36.0;
-    const double maxY = 316.0;
-    const int columns =
-        std::max(1, static_cast<int>(std::floor((maxX - minX) / std::max(1.0, spacing))));
+    const double side = scene.bounds.maxX - scene.bounds.minX;
+    const double originX = scene.bounds.minX;
+    const double originY = scene.bounds.minY;
+    const double spacing = options.radius * 2.15;
+    const double spawnX = options.radius * 2.2;
+    const double startY = options.radius * 2.5;
+    const double maxY = side * 0.72;
+    const int rows =
+        std::max(1, static_cast<int>(std::floor((maxY - startY) / std::max(1.0, spacing))));
 
     for (int index = 0; index < options.ballCount; ++index) {
-        const int column = index % columns;
-        const int row = index / columns;
-        const double x = minX + options.radius + column * spacing + jitter(rng);
-        const double y = startY + options.radius + row * spacing + jitter(rng);
-        if (y + options.radius >= maxY) {
+        const int row = index % rows;
+        const int column = index / rows;
+        const double x = originX + spawnX + static_cast<double>(column) * spacing + jitter(rng);
+        const double y = originY + startY + static_cast<double>(row) * spacing + jitter(rng);
+        if (x + options.radius >= originX + side * 0.45 || y + options.radius >= originY + maxY) {
             break;
         }
         scene.balls.push_back(makeBall(
@@ -66,21 +62,19 @@ void addContainerBalls(Scene& scene, const ScenarioOptions& options) {
 }
 
 Scene buildContainerScene(const ScenarioOptions& options) {
-    Scene scene;
-    scene.name = "container";
-    scene.bounds = {0.0, 0.0, options.width, options.height};
-    addBoundaryWalls(scene, options.width, options.height);
-
-    const double basinY = options.height - 92.0;
-    const double leftInnerX = 420.0;
-    const double rightInnerX = options.width - leftInnerX;
-
-    scene.walls.push_back({{220.0, 220.0}, {leftInnerX, basinY}});
-    scene.walls.push_back({{options.width - 220.0, 220.0}, {rightInnerX, basinY}});
-    scene.walls.push_back({{leftInnerX, basinY}, {rightInnerX, basinY}});
-    scene.walls.push_back({{260.0, 420.0}, {520.0, 420.0}});
-    scene.walls.push_back({{options.width - 520.0, 420.0}, {options.width - 260.0, 420.0}});
-
+    const double margin =
+        std::max(24.0, std::min(options.width, options.height) * 0.08);
+    const double side =
+        std::max(240.0, std::min(options.width, options.height) - margin * 2.0);
+    Scene scene = makeBoxScene(side, side, "container");
+    const Vec2 offset{
+        (options.width - side) * 0.5,
+        (options.height - side) * 0.5};
+    scene.bounds = {offset.x, offset.y, offset.x + side, offset.y + side};
+    for (Wall& wall : scene.walls) {
+        wall.a += offset;
+        wall.b += offset;
+    }
     addContainerBalls(scene, options);
     return scene;
 }

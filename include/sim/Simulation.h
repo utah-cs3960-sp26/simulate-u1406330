@@ -45,17 +45,17 @@ struct Scene {
 };
 
 struct SimulationConfig {
-    double gravity = 1400.0;
+    double gravity = 120.0;
     double restitution = 0.25;
-    double linearDamping = 0.05;
+    double linearDamping = 40.0;
     double fixedDt = 1.0 / 60.0;
-    double sleepBounceSpeed = 32.0;
-    double sleepLinearSpeed = 32.0;
+    double sleepBounceSpeed = 12.0;
+    double sleepLinearSpeed = 8.0;
     double allowedTravelPerSubstep = 0.2;
     double overlapSlop = 0.001;
     double maxLinearSpeed = 180.0;
-    int solverIterations = 10;
-    int maxSubsteps = 12;
+    int solverIterations = 8;
+    int maxSubsteps = 8;
 };
 
 struct StepStats {
@@ -83,31 +83,13 @@ public:
     StepStats lastStats() const { return lastStats_; }
 
 private:
-    struct Contact {
-        enum class Type { BallBall, BallWall };
-
-        Type type = Type::BallBall;
-        std::size_t first = 0;
-        std::size_t second = 0;
-        Vec2 normal;
-        double penetration = 0.0;
-        Vec2 point;
-    };
-
     void singleStep(double dt, StepStats& stats);
     int chooseSubsteps(double dt) const;
-    std::vector<Contact> gatherContacts(double dt) const;
-    void advanceBalls(double dt, StepStats& stats);
-    Vec2 clampMoveAgainstWalls(const Ball& ball, const Vec2& start, const Vec2& requestedEnd) const;
-    void solvePositions(const std::vector<Contact>& contacts, StepStats& stats);
-    void solveVelocities(const std::vector<Contact>& contacts,
-                         const std::vector<Vec2>& referenceVelocities);
-    void stabilizeRestingContacts(const std::vector<Contact>& contacts);
+    void solveBallCollisions(StepStats& stats);
+    void advanceBalls(double dt);
+    void solveWallOverlaps(StepStats& stats);
     void enforceBounds();
-    void applySleep(const std::vector<Contact>& contacts);
-    std::vector<bool> computeSupportedBalls(const std::vector<Contact>& contacts) const;
-    bool isSupportingNormal(const Vec2& normal) const;
-    void updateContactMetrics(const std::vector<Contact>& contacts, StepStats& stats) const;
+    void updateContactMetrics(StepStats& stats) const;
     void updateVelocityMetrics(StepStats& stats) const;
     void updateEscapeCount(StepStats& stats) const;
     double minBallRadius() const;
@@ -116,8 +98,6 @@ private:
     SimulationConfig config_;
     std::int64_t frameIndex_ = 0;
     StepStats lastStats_;
-    std::vector<int> sleepFrames_;
-    std::vector<bool> sleeping_;
 };
 
 }  // namespace sim

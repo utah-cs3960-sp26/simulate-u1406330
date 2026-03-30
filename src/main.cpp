@@ -27,17 +27,17 @@ struct Options {
     int balls = 1000;
     std::uint32_t seed = 7;
     double restitution = 0.25;
-    double gravity = 1400.0;
+    double gravity = 120.0;
     double dt = 1.0 / 60.0;
-    int sceneWidth = 1280;
+    int sceneWidth = 720;
     int sceneHeight = 720;
     double radius = 6.0;
-    double linearDamping = 0.05;
-    double sleepBounceSpeed = 32.0;
+    double linearDamping = 40.0;
+    double sleepBounceSpeed = 12.0;
     double allowedTravelPerSubstep = 0.35;
     double overlapSlop = 0.0005;
-    int solverIterations = 10;
-    int maxSubsteps = 10;
+    int solverIterations = 8;
+    int maxSubsteps = 8;
     bool dumpFinal = false;
     std::string sceneCsvPath;
     std::string outputCsvPath;
@@ -207,9 +207,10 @@ std::optional<Options> parseOptions(int argc, char** argv) {
 sim::Simulation makeSimulation(const Options& options) {
     sim::Scene scene;
     if (!options.sceneCsvPath.empty()) {
-        scene = sim::makeBoxScene(
+        scene = sim::makeInsetBoxScene(
             static_cast<double>(options.sceneWidth),
             static_cast<double>(options.sceneHeight),
+            48.0,
             "csv");
         sim::loadSceneCsv(options.sceneCsvPath, scene);
     } else {
@@ -220,6 +221,8 @@ sim::Simulation makeSimulation(const Options& options) {
         scenarioOptions.gravity = options.gravity;
         scenarioOptions.seed = options.seed;
         scenarioOptions.radius = options.radius;
+        scenarioOptions.width = static_cast<double>(options.sceneWidth);
+        scenarioOptions.height = static_cast<double>(options.sceneHeight);
         scene = sim::buildScenario(scenarioOptions);
     }
 
@@ -323,8 +326,8 @@ int runVisual(const Options& options) {
     SDL_Renderer* renderer = nullptr;
     if (!SDL_CreateWindowAndRenderer(
             "2D Physics Simulator",
-            static_cast<int>(scene.bounds.maxX),
-            static_cast<int>(scene.bounds.maxY),
+            options.sceneWidth,
+            options.sceneHeight,
             0,
             &window,
             &renderer)) {
@@ -358,8 +361,8 @@ int runVisual(const Options& options) {
 
         SDL_SetRenderDrawColor(renderer, 32, 39, 54, 255);
         SDL_FRect boundsRect{
-            0.0f,
-            0.0f,
+            static_cast<float>(simulation.scene().bounds.minX),
+            static_cast<float>(simulation.scene().bounds.minY),
             static_cast<float>(simulation.scene().bounds.maxX - simulation.scene().bounds.minX),
             static_cast<float>(simulation.scene().bounds.maxY - simulation.scene().bounds.minY)};
         SDL_RenderRect(renderer, &boundsRect);

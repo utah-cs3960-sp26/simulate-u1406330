@@ -11,7 +11,7 @@ struct ScenarioOptions {
     std::string name = "container";
     int ballCount = 1000;
     double restitution = 0.25;
-    double gravity = 1400.0;
+    double gravity = 120.0;
     std::uint32_t seed = 7;
     double radius = 6.0;
     double width = 1280.0;

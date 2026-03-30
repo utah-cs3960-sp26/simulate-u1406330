@@ -26,6 +26,12 @@ struct CsvColumns {
     std::size_t radius = std::numeric_limits<std::size_t>::max();
 };
 
+struct SceneMetadata {
+    bool hasBounds = false;
+    WorldBounds bounds;
+    std::vector<Wall> walls;
+};
+
 std::string trim(std::string text) {
     const auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
     text.erase(text.begin(), std::find_if(text.begin(), text.end(), [&](char c) {
@@ -120,6 +126,55 @@ ColorRGBA makeColor(int r, int g, int b) {
         255};
 }
 
+void parseMetadataLine(const std::string& trimmedLine, SceneMetadata& metadata) {
+    if (trimmedLine.empty() || trimmedLine.front() != '#') {
+        return;
+    }
+
+    const std::string content = trim(trimmedLine.substr(1));
+    if (content.empty()) {
+        return;
+    }
+
+    const std::vector<std::string> cells = parseCsvLine(content);
+    if (cells.empty()) {
+        return;
+    }
+
+    const std::string tag = lower(trim(cells.front()));
+    if (tag == "bounds") {
+        if (cells.size() != 5) {
+            throw std::runtime_error("bounds metadata must be # bounds,minX,minY,maxX,maxY");
+        }
+
+        WorldBounds bounds;
+        if (!parseDouble(cells[1], bounds.minX) ||
+            !parseDouble(cells[2], bounds.minY) ||
+            !parseDouble(cells[3], bounds.maxX) ||
+            !parseDouble(cells[4], bounds.maxY)) {
+            throw std::runtime_error("failed to parse bounds metadata");
+        }
+        metadata.hasBounds = true;
+        metadata.bounds = bounds;
+        return;
+    }
+
+    if (tag == "wall") {
+        if (cells.size() != 5) {
+            throw std::runtime_error("wall metadata must be # wall,ax,ay,bx,by");
+        }
+
+        Wall wall;
+        if (!parseDouble(cells[1], wall.a.x) ||
+            !parseDouble(cells[2], wall.a.y) ||
+            !parseDouble(cells[3], wall.b.x) ||
+            !parseDouble(cells[4], wall.b.y)) {
+            throw std::runtime_error("failed to parse wall metadata");
+        }
+        metadata.walls.push_back(wall);
+    }
+}
+
 }  // namespace
 
 void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
@@ -133,13 +188,18 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
     CsvColumns columns;
     bool parsedHeader = false;
     std::vector<Ball> balls;
+    SceneMetadata metadata;
 
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
         const std::string trimmed = trim(line);
-        if (trimmed.empty() || trimmed.front() == '#') {
+        if (trimmed.empty()) {
+            continue;
+        }
+        if (trimmed.front() == '#') {
+            parseMetadataLine(trimmed, metadata);
             continue;
         }
         if (!parsedHeader) {
@@ -198,6 +258,12 @@ void loadSceneCsv(const std::filesystem::path& path, Scene& scene) {
         throw std::runtime_error("scene csv did not contain a header row");
     }
 
+    if (metadata.hasBounds) {
+        scene.bounds = metadata.bounds;
+    }
+    if (!metadata.walls.empty()) {
+        scene.walls = std::move(metadata.walls);
+    }
     scene.balls = std::move(balls);
 }
 
@@ -210,8 +276,14 @@ void saveSceneCsv(const std::filesystem::path& path, const Scene& scene) {
         throw std::runtime_error("failed to open scene csv for writing: " + path.string());
     }
 
-    out << "ball_id,x,y,r,g,b,radius\n";
     out << std::setprecision(17);
+    out << "# bounds," << scene.bounds.minX << ',' << scene.bounds.minY << ','
+        << scene.bounds.maxX << ',' << scene.bounds.maxY << '\n';
+    for (const Wall& wall : scene.walls) {
+        out << "# wall," << wall.a.x << ',' << wall.a.y << ','
+            << wall.b.x << ',' << wall.b.y << '\n';
+    }
+    out << "ball_id,x,y,r,g,b,radius\n";
     for (std::size_t index = 0; index < scene.balls.size(); ++index) {
         const Ball& ball = scene.balls[index];
         out << index << ','

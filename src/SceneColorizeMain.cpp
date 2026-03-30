@@ -22,16 +22,22 @@ struct Options {
     std::string imagePath;
     std::string outputCsvPath;
     std::string finalCsvPath;
+    int sceneWidth = 720;
+    int sceneHeight = 720;
+    double containerInset = 48.0;
     int steps = 1800;
     double restitution = 0.25;
-    double gravity = 1400.0;
+    double gravity = 120.0;
     double dt = 1.0 / 60.0;
-    double linearDamping = 0.05;
-    double sleepBounceSpeed = 32.0;
+    double linearDamping = 40.0;
+    double sleepBounceSpeed = 12.0;
     double allowedTravelPerSubstep = 0.35;
     double overlapSlop = 0.0005;
-    int solverIterations = 10;
-    int maxSubsteps = 10;
+    int solverIterations = 8;
+    int maxSubsteps = 8;
+    int quietWindow = 120;
+    double maxQuietSpeed = 8.0;
+    double maxQuietEnergy = 100.0;
 };
 
 bool parseInt(std::string_view text, int& value) {
@@ -89,6 +95,21 @@ std::optional<Options> parseOptions(int argc, char** argv) {
                 return std::nullopt;
             }
             options.finalCsvPath = std::string(*value);
+        } else if (arg == "--scene-width") {
+            const auto value = next(arg);
+            if (!value || !parseInt(*value, options.sceneWidth)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--scene-height") {
+            const auto value = next(arg);
+            if (!value || !parseInt(*value, options.sceneHeight)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--container-inset") {
+            const auto value = next(arg);
+            if (!value || !parseDouble(*value, options.containerInset)) {
+                return std::nullopt;
+            }
         } else if (arg == "--steps") {
             const auto value = next(arg);
             if (!value || !parseInt(*value, options.steps)) {
@@ -139,6 +160,21 @@ std::optional<Options> parseOptions(int argc, char** argv) {
             if (!value || !parseInt(*value, options.maxSubsteps)) {
                 return std::nullopt;
             }
+        } else if (arg == "--quiet-window") {
+            const auto value = next(arg);
+            if (!value || !parseInt(*value, options.quietWindow)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--max-quiet-speed") {
+            const auto value = next(arg);
+            if (!value || !parseDouble(*value, options.maxQuietSpeed)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--max-quiet-energy") {
+            const auto value = next(arg);
+            if (!value || !parseDouble(*value, options.maxQuietEnergy)) {
+                return std::nullopt;
+            }
         } else {
             std::cerr << "unknown option: " << arg << '\n';
             return std::nullopt;
@@ -147,9 +183,12 @@ std::optional<Options> parseOptions(int argc, char** argv) {
     return options;
 }
 
-sim::Simulation makeSimulation(const Options& options, int width, int height) {
-    sim::Scene scene = sim::makeBoxScene(static_cast<double>(width), static_cast<double>(height),
-                                         "image");
+sim::Simulation makeSimulation(const Options& options) {
+    sim::Scene scene = sim::makeInsetBoxScene(
+        static_cast<double>(options.sceneWidth),
+        static_cast<double>(options.sceneHeight),
+        options.containerInset,
+        "image");
     sim::loadSceneCsv(options.sceneCsvPath, scene);
 
     sim::SimulationConfig config;
@@ -165,12 +204,36 @@ sim::Simulation makeSimulation(const Options& options, int width, int height) {
     return sim::Simulation(std::move(scene), config);
 }
 
+bool stepUntilSettled(sim::Simulation& simulation, const Options& options) {
+    int quietFrames = 0;
+    for (int step = 0; step < options.steps; ++step) {
+        simulation.step();
+        const sim::StepStats stats = simulation.lastStats();
+        const bool quiet =
+            stats.maxSpeed <= options.maxQuietSpeed &&
+            stats.kineticEnergy <= options.maxQuietEnergy &&
+            stats.overlapCount == 0;
+        if (quiet) {
+            ++quietFrames;
+            if (quietFrames >= std::max(1, options.quietWindow)) {
+                return true;
+            }
+        } else {
+            quietFrames = 0;
+        }
+    }
+    return false;
+}
+
 void printUsage() {
     std::cerr << "usage: scene_colorize --scene-csv PATH --image PATH --output-csv PATH"
+                 " [--scene-width N] [--scene-height N] [--container-inset X]"
                  " [--steps N] [--restitution R] [--gravity G] [--dt DT]"
                  " [--linear-damping D] [--sleep-bounce-speed V]"
                  " [--allowed-travel X] [--overlap-slop X] [--solver-iterations N]"
-                 " [--max-substeps N] [--final-csv PATH]\n";
+                 " [--max-substeps N] [--quiet-window N]"
+                 " [--max-quiet-speed V] [--max-quiet-energy E]"
+                 " [--final-csv PATH]\n";
 }
 
 }  // namespace
@@ -192,9 +255,13 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        sim::Simulation simulation = makeSimulation(*options, surface->w, surface->h);
+        sim::Simulation simulation = makeSimulation(*options);
         sim::Scene initialScene = simulation.scene();
-        simulation.stepMany(options->steps);
+        if (!stepUntilSettled(simulation, *options)) {
+            std::cerr << "failed to reach a settled scene within " << options->steps
+                      << " steps\n";
+            return 1;
+        }
         const sim::Scene& settledScene = simulation.scene();
         const sim::Scene recoloredScene =
             sim::assignColorsFromSettledScene(initialScene, settledScene, surface.get());

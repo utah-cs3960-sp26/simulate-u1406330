@@ -22,4 +22,22 @@ inline Scene makeBoxScene(double width, double height, std::string name = "scene
     return scene;
 }
 
+inline Scene makeInsetBoxScene(double width,
+                               double height,
+                               double margin,
+                               std::string name = "scene") {
+    Scene scene;
+    scene.name = std::move(name);
+    scene.bounds = {margin, margin, width - margin, height - margin};
+    addBoundaryWalls(
+        scene,
+        scene.bounds.maxX - scene.bounds.minX,
+        scene.bounds.maxY - scene.bounds.minY);
+    for (Wall& wall : scene.walls) {
+        wall.a += Vec2{scene.bounds.minX, scene.bounds.minY};
+        wall.b += Vec2{scene.bounds.minX, scene.bounds.minY};
+    }
+    return scene;
+}
+
 }  // namespace sim
