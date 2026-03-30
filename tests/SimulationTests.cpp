@@ -135,7 +135,7 @@ bool testPackedSceneStartsAsLaunchBlob() {
            expect(emittedAtStart < static_cast<int>(scene.balls.size() / 8),
                   "packed scene should emit only a small fraction of balls at frame zero") &&
            expect(totalVy / static_cast<double>(scene.balls.size()) > 2.0,
-                  "packed scene should drop balls into the box through the top opening");
+                  "packed scene should drop balls into the box from above the open top");
 }
 
 bool testPackedSceneHonorsRequestedBallCount() {
@@ -166,7 +166,7 @@ bool testContainerIsSquare() {
     const double width = scene.bounds.maxX - scene.bounds.minX;
     const double height = scene.bounds.maxY - scene.bounds.minY;
     return expectNear(width, height, 1e-12, "container bounds should be square") &&
-           expect(scene.walls.size() == 4, "container should only have square boundary walls");
+           expect(scene.walls.size() == 3, "container should only have left, right, and bottom walls");
 }
 
 bool testBallsSettleInBox() {

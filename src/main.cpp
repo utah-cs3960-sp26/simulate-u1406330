@@ -360,12 +360,6 @@ int runVisual(const Options& options) {
         SDL_RenderClear(renderer);
 
         SDL_SetRenderDrawColor(renderer, 32, 39, 54, 255);
-        SDL_FRect boundsRect{
-            static_cast<float>(simulation.scene().bounds.minX),
-            static_cast<float>(simulation.scene().bounds.minY),
-            static_cast<float>(simulation.scene().bounds.maxX - simulation.scene().bounds.minX),
-            static_cast<float>(simulation.scene().bounds.maxY - simulation.scene().bounds.minY)};
-        SDL_RenderRect(renderer, &boundsRect);
         for (const sim::Wall& wall : simulation.scene().walls) {
             SDL_RenderLine(
                 renderer,

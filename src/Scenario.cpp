@@ -64,12 +64,11 @@ void addContainerBalls(Scene& scene, const ScenarioOptions& options) {
 void addPackedBalls(Scene& scene, const ScenarioOptions& options) {
     const double boxWidth = scene.bounds.maxX - scene.bounds.minX;
     const double boxHeight = scene.bounds.maxY - scene.bounds.minY;
-    const double lidY = scene.bounds.minY + boxHeight * 0.14;
     int requestedCount = options.ballCount;
     const double radius = options.radius;
     if (requestedCount <= 0) {
         const double targetCoverage = 0.85;
-        const double boxArea = boxWidth * (scene.bounds.maxY - lidY);
+        const double boxArea = boxWidth * boxHeight;
         const double ballArea = 3.14159265358979323846 * radius * radius;
         requestedCount = static_cast<int>(std::floor(targetCoverage * boxArea / std::max(ballArea, 1.0)));
     }
@@ -79,12 +78,13 @@ void addPackedBalls(Scene& scene, const ScenarioOptions& options) {
     std::uniform_real_distribution<double> startVx(-2.5, 2.5);
     std::uniform_real_distribution<double> startVy(2.0, 8.0);
 
-    const double holeWidth = boxWidth * 0.18;
-    const double holeCenterX = scene.bounds.minX + boxWidth * 0.5;
-    const double nozzleMinX = holeCenterX - holeWidth * 0.5 + radius * 0.5;
-    const double nozzleMaxX = holeCenterX + holeWidth * 0.5 - radius * 0.5;
-    const double nozzleMinY = scene.bounds.minY + radius * 1.25;
-    const double nozzleMaxY = lidY - radius * 1.2;
+    const double nozzleWidth = boxWidth * 0.42;
+    const double nozzleCenterX = scene.bounds.minX + boxWidth * 0.5;
+    const double nozzleMinX = nozzleCenterX - nozzleWidth * 0.5 + radius * 0.5;
+    const double nozzleMaxX = nozzleCenterX + nozzleWidth * 0.5 - radius * 0.5;
+    const double topClearance = boxHeight * 0.16;
+    const double nozzleMinY = scene.bounds.minY - topClearance;
+    const double nozzleMaxY = scene.bounds.minY - radius * 1.2;
     const double nozzleSpacingX = radius * 2.05;
     const double nozzleSpacingY = radius * 2.05;
 
@@ -119,15 +119,15 @@ Scene buildContainerScene(const ScenarioOptions& options) {
         std::max(24.0, std::min(options.width, options.height) * 0.08);
     const double side =
         std::max(240.0, std::min(options.width, options.height) - margin * 2.0);
-    Scene scene = makeBoxScene(side, side, "container");
     const Vec2 offset{
         (options.width - side) * 0.5,
         (options.height - side) * 0.5};
+    Scene scene;
+    scene.name = "container";
     scene.bounds = {offset.x, offset.y, offset.x + side, offset.y + side};
-    for (Wall& wall : scene.walls) {
-        wall.a += offset;
-        wall.b += offset;
-    }
+    scene.walls.push_back({{scene.bounds.maxX, scene.bounds.minY}, {scene.bounds.maxX, scene.bounds.maxY}});
+    scene.walls.push_back({{scene.bounds.maxX, scene.bounds.maxY}, {scene.bounds.minX, scene.bounds.maxY}});
+    scene.walls.push_back({{scene.bounds.minX, scene.bounds.maxY}, {scene.bounds.minX, scene.bounds.minY}});
     addContainerBalls(scene, options);
     return scene;
 }
@@ -159,17 +159,9 @@ Scene buildPackedScene(const ScenarioOptions& options) {
     scene.name = "packed";
     scene.bounds = {offset.x, offset.y, offset.x + side, offset.y + side};
 
-    const double lidY = scene.bounds.minY + side * 0.14;
-    const double holeWidth = side * 0.18;
-    const double holeCenterX = scene.bounds.minX + side * 0.5;
-    const double holeMinX = holeCenterX - holeWidth * 0.5;
-    const double holeMaxX = holeCenterX + holeWidth * 0.5;
-
-    scene.walls.push_back({{scene.bounds.minX, lidY}, {holeMinX, lidY}});
-    scene.walls.push_back({{holeMaxX, lidY}, {scene.bounds.maxX, lidY}});
-    scene.walls.push_back({{scene.bounds.maxX, lidY}, {scene.bounds.maxX, scene.bounds.maxY}});
+    scene.walls.push_back({{scene.bounds.maxX, scene.bounds.minY}, {scene.bounds.maxX, scene.bounds.maxY}});
     scene.walls.push_back({{scene.bounds.maxX, scene.bounds.maxY}, {scene.bounds.minX, scene.bounds.maxY}});
-    scene.walls.push_back({{scene.bounds.minX, scene.bounds.maxY}, {scene.bounds.minX, lidY}});
+    scene.walls.push_back({{scene.bounds.minX, scene.bounds.maxY}, {scene.bounds.minX, scene.bounds.minY}});
 
     addPackedBalls(scene, options);
     return scene;
