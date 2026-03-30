@@ -52,6 +52,7 @@ if(SIMULATOR_BUILD_TESTS)
     add_test(NAME physics.restitution_energy_and_packing COMMAND physics_tests restitution_energy_and_packing)
     add_test(NAME physics.container_integrity COMMAND physics_tests container_integrity)
     add_test(NAME physics.gap_integrity COMMAND physics_tests gap_integrity)
+    add_test(NAME physics.fast_wall_containment COMMAND physics_tests fast_wall_containment)
     add_test(
         NAME physics.validation_container
         COMMAND physics_validation
@@ -61,5 +62,7 @@ if(SIMULATOR_BUILD_TESTS)
                 --restitution 0.25
                 --steps 600
                 --dump-every 200
+                --max-penetration 0.02
+                --require-no-escape-every-frame
     )
 endif()

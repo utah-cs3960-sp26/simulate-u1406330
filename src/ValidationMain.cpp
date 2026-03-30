@@ -28,6 +28,11 @@ struct Options {
     double overlapSlop = 0.0005;
     int solverIterations = 10;
     int maxSubsteps = 10;
+    int quietWindow = 0;
+    double maxQuietEnergy = 1.0;
+    double maxQuietSpeed = 1.0;
+    double maxPenetration = 0.01;
+    bool requireNoEscapeEveryFrame = false;
     bool dumpFinal = false;
 };
 
@@ -154,6 +159,28 @@ std::optional<Options> parseOptions(int argc, char** argv) {
             if (!value || !parseInt(*value, options.maxSubsteps)) {
                 return std::nullopt;
             }
+        } else if (arg == "--quiet-window") {
+            const auto value = next(arg);
+            if (!value || !parseInt(*value, options.quietWindow)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--max-quiet-energy") {
+            const auto value = next(arg);
+            if (!value || !parseDouble(*value, options.maxQuietEnergy)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--max-quiet-speed") {
+            const auto value = next(arg);
+            if (!value || !parseDouble(*value, options.maxQuietSpeed)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--max-penetration") {
+            const auto value = next(arg);
+            if (!value || !parseDouble(*value, options.maxPenetration)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--require-no-escape-every-frame") {
+            options.requireNoEscapeEveryFrame = true;
         } else if (arg == "--dump-final") {
             options.dumpFinal = true;
         } else {
@@ -191,7 +218,9 @@ void printUsage() {
                  " [--steps N] [--dump-every N] [--dump-balls N] [--dump-final]"
                  " [--seed N] [--restitution R] [--gravity G] [--dt DT] [--radius R]"
                  " [--linear-damping D] [--sleep-bounce-speed V] [--allowed-travel X]"
-                 " [--overlap-slop X] [--solver-iterations N] [--max-substeps N]\n";
+                 " [--overlap-slop X] [--solver-iterations N] [--max-substeps N]"
+                 " [--quiet-window N] [--max-quiet-energy E] [--max-quiet-speed V]"
+                 " [--max-penetration X] [--require-no-escape-every-frame]\n";
 }
 
 void dumpBalls(const sim::Simulation& simulation, int count) {
@@ -216,11 +245,27 @@ int main(int argc, char** argv) {
         }
 
         sim::Simulation simulation = makeSimulation(*options);
+        int quietRun = 0;
+        double worstPenetration = 0.0;
+        double worstEnergy = 0.0;
+        double worstSpeed = 0.0;
+        int worstEscaped = 0;
         for (int step = 0; step < options->steps; ++step) {
             simulation.step();
+            const sim::StepStats stats = simulation.lastStats();
+            worstPenetration = std::max(worstPenetration, stats.maxPenetration);
+            worstEnergy = std::max(worstEnergy, stats.kineticEnergy);
+            worstSpeed = std::max(worstSpeed, stats.maxSpeed);
+            worstEscaped = std::max(worstEscaped, stats.escapedBalls);
+            if (options->quietWindow > 0 &&
+                stats.kineticEnergy <= options->maxQuietEnergy &&
+                stats.maxSpeed <= options->maxQuietSpeed) {
+                ++quietRun;
+            } else if (options->quietWindow > 0) {
+                quietRun = 0;
+            }
             if (options->dumpEvery > 0 &&
                 (step % options->dumpEvery == 0 || step + 1 == options->steps)) {
-                const sim::StepStats stats = simulation.lastStats();
                 std::cout << "frame=" << stats.frameIndex << " substeps=" << stats.substeps
                           << " ball_ball=" << stats.ballBallContacts
                           << " ball_wall=" << stats.ballWallContacts
@@ -246,7 +291,15 @@ int main(int argc, char** argv) {
         if (options->dumpBalls > 0) {
             dumpBalls(simulation, options->dumpBalls);
         }
-        if (stats.escapedBalls != 0 || stats.maxPenetration > 0.01) {
+        if ((options->requireNoEscapeEveryFrame && worstEscaped != 0) ||
+            stats.escapedBalls != 0 ||
+            worstPenetration > options->maxPenetration ||
+            (options->quietWindow > 0 && quietRun < options->quietWindow)) {
+            std::cerr << "worst_penetration=" << worstPenetration
+                      << " worst_energy=" << worstEnergy
+                      << " worst_speed=" << worstSpeed
+                      << " worst_escaped=" << worstEscaped
+                      << " final_quiet_run=" << quietRun << '\n';
             return 1;
         }
         return 0;

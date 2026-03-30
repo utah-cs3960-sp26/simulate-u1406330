@@ -89,11 +89,15 @@ private:
     int chooseSubsteps(double dt) const;
     std::vector<Contact> gatherContacts(double dt) const;
     void advanceBalls(double dt, StepStats& stats);
+    Vec2 clampMoveAgainstWalls(const Ball& ball, const Vec2& start, const Vec2& requestedEnd) const;
     void solvePositions(const std::vector<Contact>& contacts, StepStats& stats);
     void solveVelocities(const std::vector<Contact>& contacts,
                           const std::vector<Vec2>& referenceVelocities);
+    void stabilizeRestingContacts(const std::vector<Contact>& contacts);
     void enforceBounds();
     void applySleep(const std::vector<Contact>& contacts);
+    std::vector<bool> computeSupportedBalls(const std::vector<Contact>& contacts) const;
+    bool isSupportingNormal(const Vec2& normal) const;
     void updateContactMetrics(const std::vector<Contact>& contacts, StepStats& stats) const;
     void updateVelocityMetrics(StepStats& stats) const;
     void updateEscapeCount(StepStats& stats) const;
@@ -103,6 +107,8 @@ private:
     SimulationConfig config_;
     std::int64_t frameIndex_ = 0;
     StepStats lastStats_;
+    std::vector<int> sleepFrames_;
+    std::vector<bool> sleeping_;
 };
 
 }  // namespace sim

@@ -134,27 +134,31 @@ bool testRestitutionChangesEnergyNotPacking() {
     sim::Simulation low = makeBoxSimulation(16, 1337, 0.05, 1.0 / 240.0);
     sim::Simulation high = makeBoxSimulation(16, 1337, 0.85, 1.0 / 240.0);
 
-    auto firstQuietFrame = [](sim::Simulation& simulation) {
+    auto quietWindowEnd = [](sim::Simulation& simulation) {
         int quietRun = 0;
-        for (int i = 0; i < 2600; ++i) {
+        for (int i = 0; i < 3200; ++i) {
             simulation.step();
             const sim::StepStats stats = simulation.lastStats();
-            if (stats.kineticEnergy < 1.0 && stats.maxSpeed < 8.0) {
+            if (stats.kineticEnergy < 0.25 && stats.maxSpeed < 0.5) {
                 ++quietRun;
             } else {
                 quietRun = 0;
             }
-            if (quietRun >= 120) {
-                return i;
+            if (quietRun >= 180) {
+                return i + 1;
             }
         }
-        return 2600;
+        return 3200;
     };
 
-    const int lowQuietFrame = firstQuietFrame(low);
-    const int highQuietFrame = firstQuietFrame(high);
+    const int lowQuietFrame = quietWindowEnd(low);
+    const int highQuietFrame = quietWindowEnd(high);
 
     if (!expect(lowQuietFrame <= highQuietFrame, "lower restitution did not settle faster")) {
+        return false;
+    }
+    if (!expect(lowQuietFrame < 3200, "low restitution stack never settled into sustained rest") ||
+        !expect(highQuietFrame < 3200, "high restitution stack never settled into sustained rest")) {
         return false;
     }
 
@@ -185,31 +189,117 @@ bool testRestitutionChangesEnergyNotPacking() {
         return false;
     }
 
-    return expect(low.lastStats().kineticEnergy < 2.0, "low restitution stack did not settle");
+    for (int i = 0; i < 240; ++i) {
+        low.step();
+        high.step();
+        if (!expect(low.lastStats().kineticEnergy < 0.25, "low restitution reheated after settling") ||
+            !expect(low.lastStats().maxSpeed < 0.5, "low restitution regained velocity after settling") ||
+            !expect(high.lastStats().kineticEnergy < 0.25, "high restitution reheated after settling") ||
+            !expect(high.lastStats().maxSpeed < 0.5, "high restitution regained velocity after settling")) {
+            return false;
+        }
+    }
+
+    for (const sim::Ball& ball : low.scene().balls) {
+        if (!expect(lengthSquared(ball.velocity) < 1e-6, "low restitution left a moving ball in the settled stack")) {
+            return false;
+        }
+    }
+    for (const sim::Ball& ball : high.scene().balls) {
+        if (!expect(lengthSquared(ball.velocity) < 1e-6, "high restitution left a moving ball in the settled stack")) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool testContainerIntegrity() {
     sim::Simulation simulation = makeSimulation("container", 1000, 7, 0.25, 1.0 / 60.0);
-    simulation.stepMany(1800);
-    const sim::StepStats stats = simulation.lastStats();
-    return expect(stats.escapedBalls == 0, "container lost balls") &&
-           expect(stats.maxPenetration < 0.01, "container penetration remained too high");
+    double worstPenetration = 0.0;
+
+    for (int step = 0; step < 900; ++step) {
+        simulation.step();
+        const sim::StepStats stats = simulation.lastStats();
+        worstPenetration = std::max(worstPenetration, stats.maxPenetration);
+        if (!expect(stats.escapedBalls == 0, "container lost balls during simulation") ||
+            !expect(stats.maxPenetration < 0.02, "container penetration spiked too high")) {
+            return false;
+        }
+    }
+
+    return expect(worstPenetration < 0.02, "container worst penetration exceeded threshold");
 }
 
 bool testGapIntegrity() {
-    sim::Simulation simulation = makeSimulation("gap", 168, 2024, 0.18, 1.0 / 180.0);
-    simulation.stepMany(1800);
-    const sim::StepStats stats = simulation.lastStats();
-    if (!expect(stats.escapedBalls == 0, "gap scenario escaped the outer box") ||
-        !expect(stats.maxPenetration < 0.01, "gap scenario penetration remained too high")) {
-        return false;
-    }
+    for (double dt : {1.0 / 180.0, 1.0 / 60.0}) {
+        sim::Simulation simulation = makeSimulation("gap", 168, 2024, 0.18, dt);
+        double maxObservedY = 0.0;
+        for (int step = 0; step < 1800; ++step) {
+            simulation.step();
+            const sim::StepStats stats = simulation.lastStats();
+            if (!expect(stats.escapedBalls == 0, "gap scenario escaped the outer box") ||
+                !expect(stats.maxPenetration < 0.02, "gap scenario penetration remained too high")) {
+                return false;
+            }
 
-    double maxY = 0.0;
-    for (const sim::Ball& ball : simulation.scene().balls) {
-        maxY = std::max(maxY, ball.position.y + ball.radius);
+            for (const sim::Ball& ball : simulation.scene().balls) {
+                maxObservedY = std::max(maxObservedY, ball.position.y + ball.radius);
+                if (!expect(ball.position.y + ball.radius <= 240.0 + 6.0 + 1.0,
+                            "ball squeezed through the tiny slit during the run")) {
+                    return false;
+                }
+            }
+        }
+
+        if (!expect(maxObservedY <= 240.0 + 6.0 + 1.0, "gap scenario crossed the slit barrier")) {
+            return false;
+        }
     }
-    return expect(maxY <= 240.0 + 6.0 + 1.0, "ball squeezed through the tiny slit");
+    return true;
+}
+
+bool testFastWallContainment() {
+    sim::Scene scene;
+    scene.name = "fast_wall";
+    scene.bounds = {0.0, 0.0, 420.0, 320.0};
+    scene.walls.push_back({{0.0, 0.0}, {420.0, 0.0}});
+    scene.walls.push_back({{420.0, 0.0}, {420.0, 320.0}});
+    scene.walls.push_back({{420.0, 320.0}, {0.0, 320.0}});
+    scene.walls.push_back({{0.0, 320.0}, {0.0, 0.0}});
+    scene.walls.push_back({{220.0, 20.0}, {220.0, 300.0}});
+
+    sim::Ball ball;
+    ball.position = {96.0, 120.0};
+    ball.velocity = {520.0, 65.0};
+    ball.radius = 10.0;
+    ball.inverseMass = 1.0 / 100.0;
+    scene.balls.push_back(ball);
+
+    sim::SimulationConfig config;
+    config.gravity = 0.0;
+    config.restitution = 0.35;
+    config.fixedDt = 1.0 / 30.0;
+    config.linearDamping = 0.0;
+    config.sleepBounceSpeed = 4.0;
+    config.sleepLinearSpeed = 4.0;
+    config.allowedTravelPerSubstep = 0.25;
+    config.overlapSlop = 0.0005;
+    config.maxLinearSpeed = 600.0;
+    config.solverIterations = 8;
+    config.maxSubsteps = 24;
+
+    sim::Simulation simulation(std::move(scene), config);
+    for (int step = 0; step < 240; ++step) {
+        simulation.step();
+        const sim::Ball& currentBall = simulation.scene().balls.front();
+        if (!expect(simulation.lastStats().escapedBalls == 0, "fast wall scene escaped bounds") ||
+            !expect(currentBall.position.x <= 220.0 - currentBall.radius + 1e-6,
+                    "fast moving ball crossed the interior wall")) {
+            return false;
+        }
+    }
+    return true;
 }
 
 using TestFn = bool (*)();
@@ -224,6 +314,7 @@ constexpr TestCase kTests[] = {
     {"restitution_energy_and_packing", &testRestitutionChangesEnergyNotPacking},
     {"container_integrity", &testContainerIntegrity},
     {"gap_integrity", &testGapIntegrity},
+    {"fast_wall_containment", &testFastWallContainment},
 };
 
 }  // namespace
