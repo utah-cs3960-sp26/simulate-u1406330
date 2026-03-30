@@ -5,6 +5,7 @@ Deterministic 2D ball physics simulator in C++ with an SDL3 visualizer and a hea
 ## What it includes
 
 - `simulator` executable with SDL3 visual mode and deterministic headless mode
+- `scene_colorize` executable that settles a CSV scene and samples colors from an image
 - circular balls, immovable wall segments, gravity, and configurable restitution
 - adaptive substeps plus positional projection to prevent tunneling and persistent overlap
 - uniform-grid broadphase for large ball counts
@@ -36,7 +37,17 @@ Useful flags:
 - `--dt 0.0166667`
 - `--gravity 1400`
 - `--scenario container|stack|gap`
+- `--scene-csv path\\to\\initial.csv`
 - `--dump-final`
+- `--dump-final-csv path\\to\\final.csv`
+
+CSV scene files use one row per ball with `x,y,r,g,b,radius`. The simulator loads that format as the ball list for the selected scenario and writes the same format back out with the final ball positions.
+
+The image colorization tool uses the same CSV format:
+
+```powershell
+build\\scene_colorize.exe --scene-csv path\\to\\initial.csv --image path\\to\\image.png --output-csv path\\to\\colored.csv
+```
 
 ## Debugging loop
 

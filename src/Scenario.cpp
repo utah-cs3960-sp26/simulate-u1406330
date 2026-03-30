@@ -9,12 +9,22 @@ namespace sim {
 
 namespace {
 
-Ball makeBall(const Vec2& position, const Vec2& velocity, double radius) {
+ColorRGBA makeRainbowColor(double t) {
+    const auto channel = [&](double phase) -> std::uint8_t {
+        const double value = 0.5 + 0.5 * std::sin((t + phase) * 6.28318530717958647692);
+        return static_cast<std::uint8_t>(std::clamp(std::lround(value * 255.0), 0l, 255l));
+    };
+    return {channel(0.0), channel(0.3333333333333333), channel(0.6666666666666666), 255};
+}
+
+Ball makeBall(const Vec2& position, const Vec2& velocity, double radius, const ColorRGBA& color) {
     Ball ball;
     ball.position = position;
+    ball.previousPosition = position;
     ball.velocity = velocity;
     ball.radius = radius;
     ball.inverseMass = 1.0 / std::max(1.0, radius * radius);
+    ball.color = color;
     return ball;
 }
 
@@ -47,8 +57,11 @@ void addContainerBalls(Scene& scene, const ScenarioOptions& options) {
         if (y + options.radius >= maxY) {
             break;
         }
-        scene.balls.push_back(
-            makeBall({x, y}, {startVx(rng), startVy(rng)}, options.radius));
+        scene.balls.push_back(makeBall(
+            {x, y},
+            {startVx(rng), startVy(rng)},
+            options.radius,
+            makeRainbowColor(static_cast<double>(index) * 0.017 + static_cast<double>(options.seed) * 0.0001)));
     }
 }
 
@@ -81,7 +94,8 @@ Scene buildStackScene(const ScenarioOptions& options) {
     const double radius = options.radius;
     for (int i = 0; i < 10; ++i) {
         const double y = 70.0 + static_cast<double>(i) * radius * 2.12;
-        scene.balls.push_back(makeBall({160.0, y}, {0.0, 0.0}, radius));
+        scene.balls.push_back(
+            makeBall({160.0, y}, {0.0, 0.0}, radius, makeRainbowColor(static_cast<double>(i) * 0.11)));
     }
     return scene;
 }
@@ -112,7 +126,11 @@ Scene buildGapScene(const ScenarioOptions& options) {
         if (y + options.radius >= midY - options.radius) {
             break;
         }
-            scene.balls.push_back(makeBall({x, y}, {vx(rng), 0.0}, options.radius));
+        scene.balls.push_back(makeBall(
+            {x, y},
+            {vx(rng), 0.0},
+            options.radius,
+            makeRainbowColor(static_cast<double>(index) * 0.021 + static_cast<double>(options.seed) * 0.0002)));
     }
     return scene;
 }

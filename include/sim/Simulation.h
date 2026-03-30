@@ -9,11 +9,20 @@
 
 namespace sim {
 
+struct ColorRGBA {
+    std::uint8_t r = 214;
+    std::uint8_t g = 92;
+    std::uint8_t b = 45;
+    std::uint8_t a = 255;
+};
+
 struct Ball {
     Vec2 position;
+    Vec2 previousPosition;
     Vec2 velocity;
     double radius = 6.0;
     double inverseMass = 1.0;
+    ColorRGBA color{};
 };
 
 struct Wall {
@@ -92,7 +101,7 @@ private:
     Vec2 clampMoveAgainstWalls(const Ball& ball, const Vec2& start, const Vec2& requestedEnd) const;
     void solvePositions(const std::vector<Contact>& contacts, StepStats& stats);
     void solveVelocities(const std::vector<Contact>& contacts,
-                          const std::vector<Vec2>& referenceVelocities);
+                         const std::vector<Vec2>& referenceVelocities);
     void stabilizeRestingContacts(const std::vector<Contact>& contacts);
     void enforceBounds();
     void applySleep(const std::vector<Contact>& contacts);

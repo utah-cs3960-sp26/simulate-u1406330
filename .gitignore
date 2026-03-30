@@ -3,4 +3,4 @@ build*/
 out/
 vcpkg_installed/
 codex.log
-
+reference/

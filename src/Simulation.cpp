@@ -10,123 +10,65 @@ namespace sim {
 namespace {
 
 constexpr double kEpsilon = 1e-9;
-constexpr int kSweepIterations = 18;
-constexpr int kMaxWallBouncesPerSubstep = 4;
+constexpr double kContactSkinScale = 0.1;
 constexpr int kSleepFramesThreshold = 30;
-
-struct SweepHit {
-    bool hit = false;
-    double toi = 1.0;
-    std::size_t wallIndex = 0;
-    Vec2 point;
-    Vec2 normal;
-};
 
 Vec2 perpendicular(const Vec2& v) {
     return {-v.y, v.x};
 }
 
-Vec2 collisionNormalFromMotion(const Vec2& edge, const Vec2& motion) {
-    const Vec2 wallNormal = normalize(perpendicular(edge));
-    if (dot(motion, wallNormal) > 0.0) {
-        return {-wallNormal.x, -wallNormal.y};
+double speedForBounceThreshold(double normalComponent, double dt) {
+    if (dt <= kEpsilon) {
+        return 0.0;
     }
-    return wallNormal;
-}
-
-double pointSegmentDistanceSquared(const Vec2& point, const Wall& wall) {
-    return lengthSquared(point - closestPointOnSegment(wall.a, wall.b, point));
-}
-
-SweepHit findEarliestWallHit(const Scene& scene,
-                             const Ball& ball,
-                             const Vec2& start,
-                             const Vec2& end) {
-    SweepHit bestHit;
-    const Vec2 motion = end - start;
-    const double minX = std::min(start.x, end.x) - ball.radius;
-    const double maxX = std::max(start.x, end.x) + ball.radius;
-    const double minY = std::min(start.y, end.y) - ball.radius;
-    const double maxY = std::max(start.y, end.y) + ball.radius;
-
-    for (std::size_t wallIndex = 0; wallIndex < scene.walls.size(); ++wallIndex) {
-        const Wall& wall = scene.walls[wallIndex];
-        if (std::max(wall.a.x, wall.b.x) < minX || std::min(wall.a.x, wall.b.x) > maxX ||
-            std::max(wall.a.y, wall.b.y) < minY || std::min(wall.a.y, wall.b.y) > maxY) {
-            continue;
-        }
-        const Vec2 startClosest = closestPointOnSegment(wall.a, wall.b, start);
-        const Vec2 startDelta = start - startClosest;
-        const double startDistanceSq = lengthSquared(startDelta);
-        if (startDistanceSq <= (ball.radius + 1e-10) * (ball.radius + 1e-10)) {
-            const Vec2 startNormal = normalize(
-                startDelta,
-                collisionNormalFromMotion(wall.b - wall.a, motion));
-            if (dot(motion, startNormal) < -kEpsilon) {
-                bestHit.hit = true;
-                bestHit.toi = 0.0;
-                bestHit.wallIndex = wallIndex;
-                bestHit.point = startClosest;
-                bestHit.normal = startNormal;
-                return bestHit;
-            }
-            continue;
-        }
-
-        if (segmentSegmentDistanceSquared(start, end, wall.a, wall.b) >
-            ball.radius * ball.radius) {
-            continue;
-        }
-
-        double low = 0.0;
-        double high = 1.0;
-        for (int iteration = 0; iteration < kSweepIterations; ++iteration) {
-            const double mid = (low + high) * 0.5;
-            const Vec2 midPoint = lerp(start, end, mid);
-            if (segmentSegmentDistanceSquared(start, midPoint, wall.a, wall.b) <=
-                ball.radius * ball.radius) {
-                high = mid;
-            } else {
-                low = mid;
-            }
-        }
-
-        if (high >= bestHit.toi) {
-            continue;
-        }
-
-        const Vec2 impactPosition = lerp(start, end, high);
-        const Vec2 closest = closestPointOnSegment(wall.a, wall.b, impactPosition);
-        bestHit.hit = true;
-        bestHit.toi = high;
-        bestHit.wallIndex = wallIndex;
-        bestHit.point = closest;
-        bestHit.normal = normalize(
-            impactPosition - closest,
-            collisionNormalFromMotion(wall.b - wall.a, motion));
-    }
-
-    return bestHit;
+    return std::abs(normalComponent) / dt;
 }
 
 double computeRestitution(double configuredRestitution,
-                          double normalVelocity,
+                          double normalComponent,
+                          double dt,
                           double sleepBounceSpeed) {
-    if (std::abs(normalVelocity) < sleepBounceSpeed) {
+    if (speedForBounceThreshold(normalComponent, dt) < sleepBounceSpeed) {
         return 0.0;
     }
     return configuredRestitution;
 }
 
-void clampVelocity(Vec2& velocity, double maxSpeed) {
-    if (maxSpeed <= 0.0) {
+void clampDisplacement(Vec2& displacement, double maxTravel) {
+    if (maxTravel <= 0.0) {
         return;
     }
-    const double speedSq = lengthSquared(velocity);
-    if (speedSq <= maxSpeed * maxSpeed) {
+
+    const double displacementSq = lengthSquared(displacement);
+    if (displacementSq <= maxTravel * maxTravel) {
         return;
     }
-    velocity *= maxSpeed / std::sqrt(speedSq);
+
+    displacement *= maxTravel / std::sqrt(displacementSq);
+}
+
+void writeVelocityFromDisplacement(Ball& ball, double dt) {
+    if (dt <= kEpsilon) {
+        ball.velocity = {0.0, 0.0};
+        return;
+    }
+    ball.velocity = (ball.position - ball.previousPosition) / dt;
+}
+
+void writeDisplacementFromVelocity(Ball& ball, const Vec2& velocity, double dt) {
+    ball.previousPosition = ball.position - velocity * dt;
+    ball.velocity = velocity;
+}
+
+Vec2 wallNormalTowardBall(const Wall& wall, const Vec2& referencePoint, const Vec2& fallbackMotion) {
+    Vec2 normal = normalize(perpendicular(wall.b - wall.a));
+    if (dot(referencePoint - wall.a, normal) < 0.0) {
+        normal *= -1.0;
+    }
+    if (lengthSquared(fallbackMotion) > kEpsilon && dot(fallbackMotion, normal) > 0.0) {
+        normal *= -1.0;
+    }
+    return normal;
 }
 
 }  // namespace
@@ -135,27 +77,18 @@ Simulation::Simulation(Scene scene, SimulationConfig config)
     : scene_(std::move(scene)),
       config_(config),
       sleepFrames_(scene_.balls.size(), 0),
-      sleeping_(scene_.balls.size(), false) {}
+      sleeping_(scene_.balls.size(), false) {
+    for (Ball& ball : scene_.balls) {
+        if (lengthSquared(ball.previousPosition - ball.position) <= kEpsilon) {
+            ball.previousPosition = ball.position - ball.velocity * config_.fixedDt;
+        }
+    }
+}
 
 void Simulation::step() {
     if (sleepFrames_.size() != scene_.balls.size()) {
         sleepFrames_.assign(scene_.balls.size(), 0);
         sleeping_.assign(scene_.balls.size(), false);
-    }
-
-    const std::vector<Contact> startContacts = gatherContacts(0.0);
-    std::vector<bool> supported(scene_.balls.size(), false);
-    for (const Contact& contact : startContacts) {
-        supported[contact.first] = true;
-        if (contact.type == Contact::Type::BallBall) {
-            supported[contact.second] = true;
-        }
-    }
-    for (std::size_t i = 0; i < sleeping_.size(); ++i) {
-        if (sleeping_[i] && !supported[i]) {
-            sleeping_[i] = false;
-            sleepFrames_[i] = 0;
-        }
     }
 
     StepStats stats;
@@ -167,25 +100,7 @@ void Simulation::step() {
         singleStep(subDt, stats);
     }
 
-    std::vector<Contact> contacts = gatherContacts(0.0);
-    for (int iteration = 0; iteration < 5; ++iteration) {
-        bool hasOverlap = false;
-        for (const Contact& contact : contacts) {
-            if (contact.penetration > config_.overlapSlop) {
-                hasOverlap = true;
-                break;
-            }
-        }
-        if (!hasOverlap) {
-            break;
-        }
-        solvePositions(contacts, stats);
-        enforceBounds();
-        contacts = gatherContacts(0.0);
-    }
-
-    applySleep(contacts);
-
+    const std::vector<Contact> contacts = gatherContacts(0.0);
     updateContactMetrics(contacts, stats);
     updateVelocityMetrics(stats);
     updateEscapeCount(stats);
@@ -200,27 +115,10 @@ void Simulation::stepMany(int steps) {
 }
 
 void Simulation::singleStep(double dt, StepStats& stats) {
-    const double damping = std::max(0.0, 1.0 - config_.linearDamping * dt);
-    for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
-        Ball& ball = scene_.balls[i];
-        if (sleeping_[i]) {
-            ball.velocity = {0.0, 0.0};
-            continue;
-        }
-        ball.velocity.y += config_.gravity * dt;
-        ball.velocity *= damping;
-        clampVelocity(ball.velocity, config_.maxLinearSpeed);
-    }
-
     advanceBalls(dt, stats);
-    std::vector<Vec2> referenceVelocities;
-    referenceVelocities.reserve(scene_.balls.size());
-    for (const Ball& ball : scene_.balls) {
-        referenceVelocities.push_back(ball.velocity);
-    }
 
     for (int iteration = 0; iteration < std::max(1, config_.solverIterations); ++iteration) {
-        const std::vector<Contact> contacts = gatherContacts(0.0);
+        const std::vector<Contact> contacts = gatherContacts(dt);
         if (contacts.empty()) {
             break;
         }
@@ -228,11 +126,30 @@ void Simulation::singleStep(double dt, StepStats& stats) {
         enforceBounds();
     }
 
-    const std::vector<Contact> contacts = gatherContacts(0.0);
-    solveVelocities(contacts, referenceVelocities);
+    const std::vector<Contact> contacts = gatherContacts(dt);
+    solveVelocities(contacts, {});
     stabilizeRestingContacts(contacts);
-    enforceBounds();
+
+    for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
+        Ball& ball = scene_.balls[i];
+        if (sleeping_[i]) {
+            ball.previousPosition = ball.position;
+            ball.velocity = {0.0, 0.0};
+            continue;
+        }
+        writeVelocityFromDisplacement(ball, dt);
+    }
+
     applySleep(contacts);
+    enforceBounds();
+    for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
+        if (sleeping_[i]) {
+            scene_.balls[i].previousPosition = scene_.balls[i].position;
+            scene_.balls[i].velocity = {0.0, 0.0};
+            continue;
+        }
+        writeVelocityFromDisplacement(scene_.balls[i], dt);
+    }
 }
 
 int Simulation::chooseSubsteps(double dt) const {
@@ -243,22 +160,24 @@ int Simulation::chooseSubsteps(double dt) const {
 
     double maxSpeed = 0.0;
     for (const Ball& ball : scene_.balls) {
-        maxSpeed = std::max(maxSpeed, length(ball.velocity));
+        const Vec2 displacement = ball.position - ball.previousPosition;
+        const double speed = dt > kEpsilon ? length(displacement) / dt : length(ball.velocity);
+        maxSpeed = std::max(maxSpeed, speed);
     }
 
-    const double maxTravel = std::max(radius * config_.allowedTravelPerSubstep, radius * 0.05);
-    const double estimatedTravel = maxSpeed * dt + 0.5 * config_.gravity * dt * dt;
+    const double maxTravel = std::max(radius * config_.allowedTravelPerSubstep, radius * 0.1);
     const int desired =
-        static_cast<int>(std::ceil(estimatedTravel / std::max(maxTravel, kEpsilon)));
+        static_cast<int>(std::ceil((maxSpeed * dt) / std::max(maxTravel, kEpsilon)));
     return std::clamp(std::max(1, desired), 1, std::max(1, config_.maxSubsteps));
 }
 
-std::vector<Simulation::Contact> Simulation::gatherContacts(double dt) const {
+std::vector<Simulation::Contact> Simulation::gatherContacts(double) const {
     std::vector<Contact> contacts;
-    contacts.reserve(scene_.balls.size() * 4);
+    contacts.reserve(scene_.balls.size() * 6);
 
-    const double cellSize = std::max(2.5 * minBallRadius(), 1.0);
-    const double contactSkin = std::max(config_.overlapSlop * 4.0, minBallRadius() * 0.15);
+    const double minRadius = minBallRadius();
+    const double cellSize = std::max(2.5 * minRadius, 1.0);
+    const double contactSkin = std::max(config_.overlapSlop * 2.0, minRadius * kContactSkinScale);
     const int columns = std::max(
         1,
         static_cast<int>(std::ceil((scene_.bounds.maxX - scene_.bounds.minX) / cellSize)));
@@ -300,14 +219,15 @@ std::vector<Simulation::Contact> Simulation::gatherContacts(double dt) const {
         const int cellX = cellCoord(a.position.x, scene_.bounds.minX, columns);
         const int cellY = cellCoord(a.position.y, scene_.bounds.minY, rows);
 
-        for (const auto& neighborOffset : neighborOffsets) {
-            const int neighborX = cellX + neighborOffset[0];
-            const int neighborY = cellY + neighborOffset[1];
+        for (const auto& offset : neighborOffsets) {
+            const int neighborX = cellX + offset[0];
+            const int neighborY = cellY + offset[1];
             if (neighborX < 0 || neighborX >= columns || neighborY < 0 || neighborY >= rows) {
                 continue;
             }
 
-            for (int current = cellHeads[cellIndex(neighborX, neighborY)]; current != -1;
+            for (int current = cellHeads[cellIndex(neighborX, neighborY)];
+                 current != -1;
                  current = next[static_cast<std::size_t>(current)]) {
                 const std::size_t j = static_cast<std::size_t>(current);
                 if (j <= i) {
@@ -316,43 +236,20 @@ std::vector<Simulation::Contact> Simulation::gatherContacts(double dt) const {
 
                 const Ball& b = scene_.balls[j];
                 const Vec2 delta = b.position - a.position;
-                const Vec2 relativeVelocity = b.velocity - a.velocity;
                 const double radii = a.radius + b.radius;
+                const double distanceSq = lengthSquared(delta);
                 const double contactDistance = radii + contactSkin;
-                const double contactDistanceSq = contactDistance * contactDistance;
-                const double distSq = lengthSquared(delta);
-                const double approaching = dot(delta, relativeVelocity);
-                bool speculativeContact = false;
-                double distance = 0.0;
-                Vec2 normal;
-
-                if (distSq < radii * radii) {
-                    distance = std::sqrt(std::max(distSq, 0.0));
-                    normal = distance > kEpsilon ? delta / distance : Vec2{1.0, 0.0};
-                } else if (dt > 0.0 && approaching < 0.0) {
-                    const Vec2 predictedDelta = delta + relativeVelocity * dt;
-                    const double predictedDistSq = lengthSquared(predictedDelta);
-                    if (predictedDistSq < contactDistanceSq) {
-                        speculativeContact = true;
-                        distance = std::sqrt(std::max(predictedDistSq, 0.0));
-                        normal = distance > kEpsilon ? predictedDelta / distance : normalize(delta);
-                    } else {
-                        continue;
-                    }
-                } else if (distSq < contactDistanceSq) {
-                    distance = std::sqrt(std::max(distSq, 0.0));
-                    normal = distance > kEpsilon ? delta / distance : Vec2{1.0, 0.0};
-                } else {
+                if (distanceSq > contactDistance * contactDistance) {
                     continue;
                 }
 
+                const double distance = std::sqrt(std::max(0.0, distanceSq));
                 Contact contact;
                 contact.type = Contact::Type::BallBall;
                 contact.first = i;
                 contact.second = j;
-                contact.normal = normal;
-                contact.penetration = speculativeContact ? (contactDistance - distance)
-                                                         : (radii - distance);
+                contact.normal = distance > kEpsilon ? delta / distance : Vec2{1.0, 0.0};
+                contact.penetration = radii - distance;
                 contact.point = a.position + contact.normal * a.radius;
                 contacts.push_back(contact);
             }
@@ -362,20 +259,21 @@ std::vector<Simulation::Contact> Simulation::gatherContacts(double dt) const {
             const Wall& wall = scene_.walls[wallIndex];
             const Vec2 closest = closestPointOnSegment(wall.a, wall.b, a.position);
             const Vec2 delta = a.position - closest;
+            const double distanceSq = lengthSquared(delta);
             const double contactDistance = a.radius + contactSkin;
-            const double distSq = lengthSquared(delta);
-            if (distSq >= contactDistance * contactDistance) {
+            if (distanceSq > contactDistance * contactDistance) {
                 continue;
             }
 
-            const double distance = std::sqrt(std::max(distSq, 0.0));
+            const double distance = std::sqrt(std::max(0.0, distanceSq));
             Contact contact;
             contact.type = Contact::Type::BallWall;
             contact.first = i;
             contact.second = wallIndex;
-            contact.normal = distance > kEpsilon
-                                 ? delta / distance
-                                 : collisionNormalFromMotion(wall.b - wall.a, a.velocity);
+            contact.normal =
+                distance > kEpsilon
+                    ? delta / distance
+                    : wallNormalTowardBall(wall, a.position, a.position - a.previousPosition);
             contact.penetration = a.radius - distance;
             contact.point = closest;
             contacts.push_back(contact);
@@ -385,291 +283,126 @@ std::vector<Simulation::Contact> Simulation::gatherContacts(double dt) const {
     return contacts;
 }
 
-void Simulation::advanceBalls(double dt, StepStats& stats) {
+void Simulation::advanceBalls(double dt, StepStats&) {
+    const double damping = std::max(0.0, 1.0 - config_.linearDamping * dt);
+    const double maxTravel = std::max(0.0, config_.maxLinearSpeed * dt);
+
     for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
         Ball& ball = scene_.balls[i];
         if (sleeping_[i]) {
+            ball.previousPosition = ball.position;
             ball.velocity = {0.0, 0.0};
             continue;
         }
-        Vec2 position = ball.position;
-        Vec2 velocity = ball.velocity;
-        double remainingTime = dt;
 
-        for (int bounce = 0; bounce < kMaxWallBouncesPerSubstep && remainingTime > 1e-8; ++bounce) {
-            const Vec2 target = position + velocity * remainingTime;
-            const SweepHit hit = findEarliestWallHit(scene_, ball, position, target);
-            if (!hit.hit) {
-                position = target;
-                remainingTime = 0.0;
-                break;
-            }
-
-            const double advanceTime = remainingTime * hit.toi;
-            position += velocity * advanceTime;
-            position = hit.point + hit.normal * (ball.radius + config_.overlapSlop);
-
-            const double normalVelocity = dot(velocity, hit.normal);
-            if (normalVelocity < 0.0) {
-                const double restitution = computeRestitution(
-                    config_.restitution,
-                    normalVelocity,
-                    config_.sleepBounceSpeed);
-                velocity -= (1.0 + restitution) * normalVelocity * hit.normal;
-                clampVelocity(velocity, config_.maxLinearSpeed);
-            }
-
-            remainingTime *= (1.0 - hit.toi);
-            remainingTime = std::max(0.0, remainingTime - dt * 1e-4);
-            ++stats.ballWallContacts;
-        }
-
-        if (remainingTime > 1e-8) {
-            position += velocity * remainingTime;
-        }
-
-        ball.position = position;
-        ball.velocity = velocity;
+        Vec2 displacement = (ball.position - ball.previousPosition) * damping;
+        clampDisplacement(displacement, maxTravel);
+        const Vec2 current = ball.position;
+        ball.position = current + displacement + Vec2{0.0, config_.gravity * dt * dt};
+        ball.previousPosition = current;
     }
 }
 
-Vec2 Simulation::clampMoveAgainstWalls(const Ball& ball,
-                                       const Vec2& start,
-                                       const Vec2& requestedEnd) const {
-    Vec2 position = start;
-    Vec2 remaining = requestedEnd - start;
-
-    for (int bounce = 0; bounce < kMaxWallBouncesPerSubstep; ++bounce) {
-        if (lengthSquared(remaining) <= 1e-12) {
-            return position;
-        }
-
-        const Vec2 target = position + remaining;
-        const SweepHit hit = findEarliestWallHit(scene_, ball, position, target);
-        if (!hit.hit) {
-            return target;
-        }
-
-        const Vec2 impactPosition = lerp(position, target, hit.toi);
-        const Vec2 leftover = target - impactPosition;
-        position = hit.point + hit.normal * (ball.radius + config_.overlapSlop);
-        remaining = leftover;
-        const double intoWall = dot(remaining, hit.normal);
-        if (intoWall < 0.0) {
-            remaining -= hit.normal * intoWall;
-        }
-    }
-
-    return position;
+Vec2 Simulation::clampMoveAgainstWalls(const Ball&, const Vec2&, const Vec2& requestedEnd) const {
+    return requestedEnd;
 }
 
 void Simulation::solvePositions(const std::vector<Contact>& contacts, StepStats&) {
-    const double separationBias = std::max(config_.overlapSlop, minBallRadius() * 0.08);
-    const double wakeMoveThresholdSq =
-        std::pow(std::max(config_.overlapSlop * 4.0, minBallRadius() * 0.01), 2.0);
-
-    for (auto it = contacts.rbegin(); it != contacts.rend(); ++it) {
-        const Contact& contact = *it;
-        if (contact.type != Contact::Type::BallBall) {
-            continue;
-        }
-
-        const double correction =
-            std::max(0.0, contact.penetration + separationBias - config_.overlapSlop);
-        if (correction <= 0.0) {
-            continue;
-        }
-
-        Ball& a = scene_.balls[contact.first];
-        Ball& b = scene_.balls[contact.second];
-        const double inverseMassSum = a.inverseMass + b.inverseMass;
-        if (inverseMassSum <= kEpsilon) {
-            continue;
-        }
-
-        const double aShare = a.inverseMass / inverseMassSum;
-        const double bShare = b.inverseMass / inverseMassSum;
-        const Vec2 originalAPosition = a.position;
-        const Vec2 originalBPosition = b.position;
-        const Vec2 aTarget = a.position - contact.normal * (correction * aShare);
-        const Vec2 bTarget = b.position + contact.normal * (correction * bShare);
-        a.position = clampMoveAgainstWalls(a, a.position, aTarget);
-        b.position = clampMoveAgainstWalls(b, b.position, bTarget);
-        double realizedCorrection =
-            dot(originalAPosition - a.position, contact.normal) +
-            dot(b.position - originalBPosition, contact.normal);
-        double remainingCorrection = std::max(0.0, correction - realizedCorrection);
-
-        if (remainingCorrection > kEpsilon) {
-            const Vec2 extraATarget = a.position - contact.normal * remainingCorrection;
-            const Vec2 extraBTarget = b.position + contact.normal * remainingCorrection;
-            const Vec2 extraAPosition = clampMoveAgainstWalls(a, a.position, extraATarget);
-            realizedCorrection += dot(a.position - extraAPosition, contact.normal);
-            a.position = extraAPosition;
-            remainingCorrection = std::max(0.0, correction - realizedCorrection);
-            if (remainingCorrection > kEpsilon) {
-                const Vec2 extraBPosition = clampMoveAgainstWalls(b, b.position, extraBTarget);
-                realizedCorrection += dot(extraBPosition - b.position, contact.normal);
-                b.position = extraBPosition;
-            }
-        }
-
-        if (lengthSquared(a.position - originalAPosition) > wakeMoveThresholdSq ||
-            lengthSquared(b.position - originalBPosition) > wakeMoveThresholdSq) {
-            sleeping_[contact.first] = false;
-            sleeping_[contact.second] = false;
-            sleepFrames_[contact.first] = 0;
-            sleepFrames_[contact.second] = 0;
-        }
-    }
-
     for (const Contact& contact : contacts) {
-        if (contact.type != Contact::Type::BallWall) {
-            continue;
-        }
-
-        const double correction =
-            std::max(0.0, contact.penetration + separationBias - config_.overlapSlop);
-        if (correction <= 0.0) {
-            continue;
-        }
-
-        Ball& ball = scene_.balls[contact.first];
-        const Vec2 originalPosition = ball.position;
-        const Vec2 target = ball.position + contact.normal * correction;
-        ball.position = clampMoveAgainstWalls(ball, ball.position, target);
-        if (lengthSquared(ball.position - originalPosition) > wakeMoveThresholdSq) {
-            sleeping_[contact.first] = false;
-            sleepFrames_[contact.first] = 0;
-        }
-    }
-}
-
-void Simulation::solveVelocities(const std::vector<Contact>& contacts,
-                                 const std::vector<Vec2>& referenceVelocities) {
-    const int iterations = std::max(1, config_.solverIterations * 4);
-    for (int iteration = 0; iteration < iterations; ++iteration) {
-        for (const Contact& contact : contacts) {
-            if (contact.type != Contact::Type::BallWall) {
-                continue;
-            }
-
-            Ball& ball = scene_.balls[contact.first];
-            const double currentNormalVelocity = dot(ball.velocity, contact.normal);
-            if (currentNormalVelocity >= 0.0) {
-                continue;
-            }
-
-            const double referenceNormalVelocity =
-                dot(referenceVelocities[contact.first], contact.normal);
-            double restitution = computeRestitution(
-                config_.restitution,
-                referenceNormalVelocity,
-                config_.sleepBounceSpeed);
-            if (contact.penetration > config_.overlapSlop * 2.0 ||
-                std::abs(referenceNormalVelocity) < config_.sleepBounceSpeed) {
-                restitution = 0.0;
-            }
-            const double desiredNormalVelocity =
-                std::max(0.0, -referenceNormalVelocity * restitution);
-            ball.velocity += (desiredNormalVelocity - currentNormalVelocity) * contact.normal;
-            clampVelocity(ball.velocity, config_.maxLinearSpeed);
-        }
-
-        for (auto it = contacts.rbegin(); it != contacts.rend(); ++it) {
-            const Contact& contact = *it;
-            if (contact.type != Contact::Type::BallBall) {
+        if (contact.type == Contact::Type::BallBall) {
+            if (contact.penetration <= 0.0) {
                 continue;
             }
 
             Ball& a = scene_.balls[contact.first];
             Ball& b = scene_.balls[contact.second];
-            const Vec2 currentRelativeVelocity = b.velocity - a.velocity;
-            const double currentNormalVelocity = dot(currentRelativeVelocity, contact.normal);
-            if (currentNormalVelocity >= 0.0) {
-                continue;
-            }
-
             const double inverseMassSum = a.inverseMass + b.inverseMass;
             if (inverseMassSum <= kEpsilon) {
                 continue;
             }
 
-            const Vec2 referenceRelativeVelocity =
-                referenceVelocities[contact.second] - referenceVelocities[contact.first];
-            const double referenceNormalVelocity = dot(referenceRelativeVelocity, contact.normal);
-            double restitution = computeRestitution(
-                config_.restitution,
-                referenceNormalVelocity,
-                config_.sleepBounceSpeed);
-            if (contact.penetration > config_.overlapSlop * 2.0 ||
-                std::abs(referenceNormalVelocity) < config_.sleepBounceSpeed) {
-                restitution = 0.0;
+            const double aShare = a.inverseMass / inverseMassSum;
+            const double bShare = b.inverseMass / inverseMassSum;
+            const Vec2 correction = contact.normal * (contact.penetration + config_.overlapSlop);
+            a.position -= correction * aShare;
+            b.position += correction * bShare;
+
+            const Vec2 velocityA = a.position - a.previousPosition;
+            const Vec2 velocityB = b.position - b.previousPosition;
+            const Vec2 relativeVelocity = velocityB - velocityA;
+            const double normalVelocity = dot(relativeVelocity, contact.normal);
+            if (normalVelocity < 0.0) {
+                const double restitution = computeRestitution(
+                    config_.restitution,
+                    normalVelocity,
+                    config_.fixedDt,
+                    config_.sleepBounceSpeed);
+                const double impulse = (-(1.0 + restitution) * normalVelocity) / inverseMassSum;
+                writeDisplacementFromVelocity(
+                    a,
+                    velocityA - contact.normal * (impulse * a.inverseMass),
+                    1.0);
+                writeDisplacementFromVelocity(
+                    b,
+                    velocityB + contact.normal * (impulse * b.inverseMass),
+                    1.0);
             }
-            const double desiredNormalVelocity =
-                std::max(0.0, -referenceNormalVelocity * restitution);
-            const double impulse =
-                (desiredNormalVelocity - currentNormalVelocity) / inverseMassSum;
-            a.velocity -= contact.normal * (impulse * a.inverseMass);
-            b.velocity += contact.normal * (impulse * b.inverseMass);
-            clampVelocity(a.velocity, config_.maxLinearSpeed);
-            clampVelocity(b.velocity, config_.maxLinearSpeed);
+            continue;
+        }
+
+        if (contact.penetration <= 0.0) {
+            continue;
+        }
+
+        Ball& ball = scene_.balls[contact.first];
+        ball.position += contact.normal * (contact.penetration + config_.overlapSlop);
+        const Vec2 displacement = ball.position - ball.previousPosition;
+        const double normalVelocity = dot(displacement, contact.normal);
+        if (normalVelocity < 0.0) {
+            const double restitution = computeRestitution(
+                config_.restitution,
+                normalVelocity,
+                config_.fixedDt,
+                config_.sleepBounceSpeed);
+            const Vec2 reflected =
+                displacement - (1.0 + restitution) * normalVelocity * contact.normal;
+            writeDisplacementFromVelocity(ball, reflected, 1.0);
         }
     }
 }
 
+void Simulation::solveVelocities(const std::vector<Contact>&,
+                                 const std::vector<Vec2>&) {
+}
+
 void Simulation::stabilizeRestingContacts(const std::vector<Contact>& contacts) {
-    const double quietNormalSpeed = std::max(config_.sleepBounceSpeed, config_.sleepLinearSpeed * 0.5);
+    const double quietSpeed = std::max(config_.sleepLinearSpeed, config_.sleepBounceSpeed * 0.5);
+    const double quietSpeedSq = quietSpeed * quietSpeed;
 
     for (const Contact& contact : contacts) {
-        if (contact.type == Contact::Type::BallWall) {
-            if (!isSupportingNormal(contact.normal)) {
-                continue;
-            }
-
-            Ball& ball = scene_.balls[contact.first];
-            const double normalVelocity = dot(ball.velocity, contact.normal);
-            if (std::abs(normalVelocity) > quietNormalSpeed) {
-                continue;
-            }
-            ball.velocity -= contact.normal * normalVelocity;
-            if (lengthSquared(ball.velocity) <= quietNormalSpeed * quietNormalSpeed) {
-                ball.velocity = {0.0, 0.0};
-            }
+        if (contact.type != Contact::Type::BallWall || !isSupportingNormal(contact.normal)) {
             continue;
         }
 
-        if (std::abs(contact.normal.y) < 0.35) {
+        Ball& ball = scene_.balls[contact.first];
+        const Vec2 displacement = ball.position - ball.previousPosition;
+        if (lengthSquared(displacement) > quietSpeedSq * config_.fixedDt * config_.fixedDt) {
             continue;
         }
 
-        Ball& a = scene_.balls[contact.first];
-        Ball& b = scene_.balls[contact.second];
-        const Vec2 relativeVelocity = b.velocity - a.velocity;
-        const double normalVelocity = dot(relativeVelocity, contact.normal);
-        if (std::abs(normalVelocity) > quietNormalSpeed) {
+        const double normalComponent = dot(displacement, contact.normal);
+        if (normalComponent > 0.0) {
             continue;
         }
 
-        const double inverseMassSum = a.inverseMass + b.inverseMass;
-        if (inverseMassSum <= kEpsilon) {
-            continue;
-        }
-
-        const double impulse = -normalVelocity / inverseMassSum;
-        a.velocity -= contact.normal * (impulse * a.inverseMass);
-        b.velocity += contact.normal * (impulse * b.inverseMass);
-        if (lengthSquared(a.velocity) <= quietNormalSpeed * quietNormalSpeed) {
-            a.velocity = {0.0, 0.0};
-        }
-        if (lengthSquared(b.velocity) <= quietNormalSpeed * quietNormalSpeed) {
-            b.velocity = {0.0, 0.0};
-        }
+        const Vec2 stabilized = displacement - contact.normal * normalComponent;
+        ball.previousPosition = ball.position - stabilized;
     }
 }
 
 void Simulation::enforceBounds() {
     for (Ball& ball : scene_.balls) {
+        Vec2 displacement = ball.position - ball.previousPosition;
         const double minX = scene_.bounds.minX + ball.radius;
         const double maxX = scene_.bounds.maxX - ball.radius;
         const double minY = scene_.bounds.minY + ball.radius;
@@ -677,50 +410,35 @@ void Simulation::enforceBounds() {
 
         if (ball.position.x < minX) {
             ball.position.x = minX;
-            if (ball.velocity.x < 0.0) {
-                const double restitution = computeRestitution(
-                    config_.restitution,
-                    ball.velocity.x,
-                    config_.sleepBounceSpeed);
-                ball.velocity.x = -ball.velocity.x * restitution;
+            if (displacement.x < 0.0) {
+                displacement.x = -displacement.x * config_.restitution;
             }
         } else if (ball.position.x > maxX) {
             ball.position.x = maxX;
-            if (ball.velocity.x > 0.0) {
-                const double restitution = computeRestitution(
-                    config_.restitution,
-                    -ball.velocity.x,
-                    config_.sleepBounceSpeed);
-                ball.velocity.x = -ball.velocity.x * restitution;
+            if (displacement.x > 0.0) {
+                displacement.x = -displacement.x * config_.restitution;
             }
         }
 
         if (ball.position.y < minY) {
             ball.position.y = minY;
-            if (ball.velocity.y < 0.0) {
-                const double restitution = computeRestitution(
-                    config_.restitution,
-                    ball.velocity.y,
-                    config_.sleepBounceSpeed);
-                ball.velocity.y = -ball.velocity.y * restitution;
+            if (displacement.y < 0.0) {
+                displacement.y = -displacement.y * config_.restitution;
             }
         } else if (ball.position.y > maxY) {
             ball.position.y = maxY;
-            if (ball.velocity.y > 0.0) {
-                const double restitution = computeRestitution(
-                    config_.restitution,
-                    -ball.velocity.y,
-                    config_.sleepBounceSpeed);
-                ball.velocity.y = -ball.velocity.y * restitution;
+            if (displacement.y > 0.0) {
+                displacement.y = -displacement.y * config_.restitution;
             }
         }
+
+        ball.previousPosition = ball.position - displacement;
     }
 }
 
 void Simulation::applySleep(const std::vector<Contact>& contacts) {
     std::vector<bool> hasContact(scene_.balls.size(), false);
     const std::vector<bool> supported = computeSupportedBalls(contacts);
-    const double quietSpeedSq = config_.sleepLinearSpeed * config_.sleepLinearSpeed;
 
     for (const Contact& contact : contacts) {
         hasContact[contact.first] = true;
@@ -729,6 +447,7 @@ void Simulation::applySleep(const std::vector<Contact>& contacts) {
         }
     }
 
+    const double quietSpeedSq = config_.sleepLinearSpeed * config_.sleepLinearSpeed;
     for (std::size_t i = 0; i < scene_.balls.size(); ++i) {
         const double speedSq = lengthSquared(scene_.balls[i].velocity);
         if (!hasContact[i] || !supported[i]) {
@@ -736,14 +455,17 @@ void Simulation::applySleep(const std::vector<Contact>& contacts) {
             sleepFrames_[i] = 0;
             continue;
         }
+
         if (speedSq <= quietSpeedSq) {
             ++sleepFrames_[i];
         } else {
             sleeping_[i] = false;
             sleepFrames_[i] = 0;
         }
+
         if (sleepFrames_[i] >= kSleepFramesThreshold) {
             sleeping_[i] = true;
+            scene_.balls[i].previousPosition = scene_.balls[i].position;
             scene_.balls[i].velocity = {0.0, 0.0};
         }
     }
@@ -769,10 +491,6 @@ std::vector<bool> Simulation::computeSupportedBalls(const std::vector<Contact>& 
             const std::size_t upper = contact.normal.y > 0.0 ? contact.first : contact.second;
             const std::size_t lower = contact.normal.y > 0.0 ? contact.second : contact.first;
             if (supported[lower] && !supported[upper]) {
-                supported[upper] = true;
-                changed = true;
-            }
-            if (sleeping_[lower] && !supported[upper]) {
                 supported[upper] = true;
                 changed = true;
             }

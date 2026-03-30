@@ -4,11 +4,15 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
+#include "sim/SceneCsv.h"
+#include "sim/SceneSetup.h"
 #include "sim/Scenario.h"
 #include "sim/Simulation.h"
 
@@ -25,6 +29,8 @@ struct Options {
     double restitution = 0.25;
     double gravity = 1400.0;
     double dt = 1.0 / 60.0;
+    int sceneWidth = 1280;
+    int sceneHeight = 720;
     double radius = 6.0;
     double linearDamping = 0.05;
     double sleepBounceSpeed = 32.0;
@@ -33,6 +39,8 @@ struct Options {
     int solverIterations = 10;
     int maxSubsteps = 10;
     bool dumpFinal = false;
+    std::string sceneCsvPath;
+    std::string outputCsvPath;
 };
 
 bool parseInt(std::string_view text, int& value) {
@@ -129,6 +137,16 @@ std::optional<Options> parseOptions(int argc, char** argv) {
             if (!value || !parseDouble(*value, options.dt)) {
                 return std::nullopt;
             }
+        } else if (arg == "--scene-width") {
+            const auto value = next(arg);
+            if (!value || !parseInt(*value, options.sceneWidth)) {
+                return std::nullopt;
+            }
+        } else if (arg == "--scene-height") {
+            const auto value = next(arg);
+            if (!value || !parseInt(*value, options.sceneHeight)) {
+                return std::nullopt;
+            }
         } else if (arg == "--radius") {
             const auto value = next(arg);
             if (!value || !parseDouble(*value, options.radius)) {
@@ -166,6 +184,18 @@ std::optional<Options> parseOptions(int argc, char** argv) {
             }
         } else if (arg == "--dump-final") {
             options.dumpFinal = true;
+        } else if (arg == "--scene-csv") {
+            const auto value = next(arg);
+            if (!value) {
+                return std::nullopt;
+            }
+            options.sceneCsvPath = std::string(*value);
+        } else if (arg == "--dump-final-csv") {
+            const auto value = next(arg);
+            if (!value) {
+                return std::nullopt;
+            }
+            options.outputCsvPath = std::string(*value);
         } else {
             std::cerr << "unknown option: " << arg << '\n';
             return std::nullopt;
@@ -175,15 +205,24 @@ std::optional<Options> parseOptions(int argc, char** argv) {
 }
 
 sim::Simulation makeSimulation(const Options& options) {
-    sim::ScenarioOptions scenarioOptions;
-    scenarioOptions.name = options.scenario;
-    scenarioOptions.ballCount = options.balls;
-    scenarioOptions.restitution = options.restitution;
-    scenarioOptions.gravity = options.gravity;
-    scenarioOptions.seed = options.seed;
-    scenarioOptions.radius = options.radius;
+    sim::Scene scene;
+    if (!options.sceneCsvPath.empty()) {
+        scene = sim::makeBoxScene(
+            static_cast<double>(options.sceneWidth),
+            static_cast<double>(options.sceneHeight),
+            "csv");
+        sim::loadSceneCsv(options.sceneCsvPath, scene);
+    } else {
+        sim::ScenarioOptions scenarioOptions;
+        scenarioOptions.name = options.scenario;
+        scenarioOptions.ballCount = options.balls;
+        scenarioOptions.restitution = options.restitution;
+        scenarioOptions.gravity = options.gravity;
+        scenarioOptions.seed = options.seed;
+        scenarioOptions.radius = options.radius;
+        scene = sim::buildScenario(scenarioOptions);
+    }
 
-    sim::Scene scene = sim::buildScenario(scenarioOptions);
     sim::SimulationConfig config;
     config.gravity = options.gravity;
     config.restitution = options.restitution;
@@ -195,6 +234,17 @@ sim::Simulation makeSimulation(const Options& options) {
     config.solverIterations = options.solverIterations;
     config.maxSubsteps = options.maxSubsteps;
     return sim::Simulation(std::move(scene), config);
+}
+
+void maybeDumpFinalCsv(const Options& options, const sim::Simulation& simulation) {
+    if (options.outputCsvPath.empty()) {
+        return;
+    }
+    std::filesystem::path outputPath(options.outputCsvPath);
+    if (outputPath.has_parent_path()) {
+        std::filesystem::create_directories(outputPath.parent_path());
+    }
+    sim::saveSceneCsv(outputPath, simulation.scene());
 }
 
 void printStats(const sim::StepStats& stats) {
@@ -232,6 +282,7 @@ int runHeadless(const Options& options) {
     if (options.dumpFinal) {
         printStats(simulation.lastStats());
     }
+    maybeDumpFinalCsv(options, simulation);
     if (options.dumpBalls > 0) {
         printBallStates(simulation, options.dumpBalls);
     }
@@ -321,8 +372,13 @@ int runVisual(const Options& options) {
                 static_cast<float>(wall.b.y));
         }
 
-        SDL_SetRenderDrawColor(renderer, 214, 92, 45, 255);
         for (const sim::Ball& ball : simulation.scene().balls) {
+            SDL_SetRenderDrawColor(
+                renderer,
+                ball.color.r,
+                ball.color.g,
+                ball.color.b,
+                ball.color.a);
             drawFilledCircle(
                 renderer,
                 static_cast<float>(ball.position.x),
@@ -334,6 +390,7 @@ int runVisual(const Options& options) {
         SDL_Delay(1);
     }
 
+    maybeDumpFinalCsv(options, simulation);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
@@ -343,9 +400,11 @@ int runVisual(const Options& options) {
 void printUsage() {
     std::cerr << "usage: simulator [--mode visual|headless] [--scenario container|stack|gap]"
                  " [--balls N] [--steps N] [--dump-every N] [--dump-balls N] [--dump-final]"
-                 " [--seed N] [--restitution R] [--gravity G] [--dt DT] [--radius R]"
+                 " [--seed N] [--restitution R] [--gravity G] [--dt DT]"
+                 " [--scene-width N] [--scene-height N] [--radius R]"
                  " [--linear-damping D] [--sleep-bounce-speed V] [--allowed-travel X]"
-                 " [--overlap-slop X] [--solver-iterations N] [--max-substeps N]\n";
+                 " [--overlap-slop X] [--solver-iterations N] [--max-substeps N]"
+                 " [--scene-csv PATH] [--dump-final-csv PATH]\n";
 }
 
 }  // namespace
